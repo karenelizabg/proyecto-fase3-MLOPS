@@ -16,8 +16,8 @@ S3 (P2-25, explicado abajo). Dev usa `10.10.0.0/16`; prod, `10.20.0.0/16`. Ambos
 solo por llamarse prod: esta es una base mínima, no una arquitectura de producción.
 
 Los buckets se generarían con prefijos `mlops-p2-dev-artifacts-` y
-`mlops-p2-prod-artifacts-`. Son independientes de `mlops-p2-dvc-cache` y
-`mlops-p2-dataset-releases`: no se referencian, importan ni modifican esos recursos.
+`mlops-p2-prod-artifacts-`. Son independientes de `mlops-p2-dvc-cache-222629887955` y
+`mlops-p2-dataset-releases-222629887955`: no se referencian, importan ni modifican esos recursos.
 Tampoco se cambian DVC, MinIO, Docker Compose, el portal o el pipeline Python.
 
 Los access logs se entregan al bucket independiente `${name}-access-logs-...`,
@@ -98,14 +98,16 @@ fuera del código. Los estados, planes y variables locales están ignorados.
 El root independiente `bootstrap/github-oidc` define un IAM OIDC provider para
 `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`, y
 el rol `mlops-p2-github-oidc`. No depende de los módulos de P2-06 ni los despliega.
-No se adjuntan políticas de acceso a recursos al rol: este ticket comprueba solo
-autenticación. `sts:GetCallerIdentity` no necesita permisos adicionales.
+El rol tiene una sola política: lectura (`s3:ListBucket` y `s3:GetObject`) del
+remote DVC `mlops-p2-dvc-cache-222629887955`, para la compuerta de PROD del CI.
 
 La trust policy permite `sts:AssumeRoleWithWebIdentity` exclusivamente con
 `aud = sts.amazonaws.com` y
-`sub = repo:karenelizabg/proyecto-fase2-MLOPS:ref:refs/heads/main`.
-No permite otros repositorios, ramas, tags, pull requests ni subjects de GitHub
-Environments. El job OIDC no declara `environment` para conservar ese subject.
+`sub = repo:karenelizabg@153574034/proyecto-fase3-MLOPS@1381627489:ref:refs/heads/main` o
+`sub = repo:karenelizabg@153574034/proyecto-fase3-MLOPS@1381627489:pull_request` (GitHub no emite
+tokens OIDC para PRs desde forks). El repo usa subjects inmutables de GitHub
+(`owner@id/repo@id`), por eso los IDs numéricos. No permite otros repositorios, ramas, tags ni
+subjects de GitHub Environments. El job OIDC no declara `environment` para conservar ese subject.
 
 ### Validación estática y prueba real
 
@@ -170,7 +172,7 @@ uno bajo su propio prefijo `access-logs/dvc-cache/` y
 permitir la entrega de logs desde estos dos buckets además de `this`.
 Igual que en P2-06, los nombres se generan con `bucket_prefix` (p. ej.
 `mlops-p2-dev-dvc-cache-<sufijo>`): son independientes de
-`mlops-p2-dvc-cache` y `mlops-p2-dataset-releases` (los buckets reales de
+`mlops-p2-dvc-cache-222629887955` y `mlops-p2-dataset-releases-222629887955` (los buckets reales de
 P2-04); no se referencian, importan ni modifican.
 
 `modules/network` agrega un `aws_vpc_endpoint` tipo Gateway para S3,
