@@ -133,6 +133,14 @@ def test_unknown_category_id_is_rejected():
         count_original_images_per_class(coco, config)
 
 
+def test_invalid_box_with_unknown_category_is_also_rejected():
+    coco = _document()
+    coco["annotations"][1]["category_id"] = 99  # caja degenerada + categoría desconocida
+    config = load_invalid_box_config()
+    with pytest.raises(ValueError, match="Unknown category_id"):
+        count_original_images_per_class(coco, config)
+
+
 def test_malformed_bbox_is_rejected():
     coco = _document()
     coco["annotations"][0]["bbox"] = [0, 0, float("nan"), 10]

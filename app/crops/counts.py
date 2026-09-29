@@ -34,11 +34,11 @@ def count_original_images_per_class(coco: dict, config: InvalidBoxConfig) -> dic
     images_by_category = {category["id"]: set() for category in coco["categories"]}
     valid_images: set = set()
     for annotation in coco["annotations"]:
-        if annotation["id"] in invalid:
-            continue
         category_id = annotation["category_id"]
         if category_id not in images_by_category:
             raise ValueError(f"Unknown category_id: {category_id}")
+        if annotation["id"] in invalid:
+            continue
         images_by_category[category_id].add(annotation["image_id"])
         valid_images.add(annotation["image_id"])
 
