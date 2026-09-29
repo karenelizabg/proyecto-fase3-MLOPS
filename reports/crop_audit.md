@@ -17,4 +17,4 @@ Muestra de **10** recortes al azar (semilla `42`) de **668** recortes válidos. 
 | 9 | `000215_000247` | `dog.92.jpg` | 247 | dog | (33.2578125, 19.8515625, 189.02734375, 213.1484375) | 190x214 |
 | 10 | `000022_000024` | `cat.19.jpg` | 24 | cat | (135.828125, 90.70703125, 68.1953125, 95.30859375) | 70x97 |
 
-**Firmado por:** ______________________  **Fecha:** ______________
+**Firmado por:** Angel Piña  **Fecha:** 29 de septiembre del 2026
