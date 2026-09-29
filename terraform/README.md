@@ -16,8 +16,8 @@ S3 (P2-25, explicado abajo). Dev usa `10.10.0.0/16`; prod, `10.20.0.0/16`. Ambos
 solo por llamarse prod: esta es una base mínima, no una arquitectura de producción.
 
 Los buckets se generarían con prefijos `mlops-p2-dev-artifacts-` y
-`mlops-p2-prod-artifacts-`. Son independientes de `mlops-p2-dvc-cache` y
-`mlops-p2-dataset-releases`: no se referencian, importan ni modifican esos recursos.
+`mlops-p2-prod-artifacts-`. Son independientes de `mlops-p2-dvc-cache-222629887955` y
+`mlops-p2-dataset-releases-222629887955`: no se referencian, importan ni modifican esos recursos.
 Tampoco se cambian DVC, MinIO, Docker Compose, el portal o el pipeline Python.
 
 Los access logs se entregan al bucket independiente `${name}-access-logs-...`,
@@ -103,7 +103,7 @@ autenticación. `sts:GetCallerIdentity` no necesita permisos adicionales.
 
 La trust policy permite `sts:AssumeRoleWithWebIdentity` exclusivamente con
 `aud = sts.amazonaws.com` y
-`sub = repo:karenelizabg/proyecto-fase2-MLOPS:ref:refs/heads/main`.
+`sub = repo:karenelizabg/proyecto-fase3-MLOPS:ref:refs/heads/main`.
 No permite otros repositorios, ramas, tags, pull requests ni subjects de GitHub
 Environments. El job OIDC no declara `environment` para conservar ese subject.
 
@@ -170,7 +170,7 @@ uno bajo su propio prefijo `access-logs/dvc-cache/` y
 permitir la entrega de logs desde estos dos buckets además de `this`.
 Igual que en P2-06, los nombres se generan con `bucket_prefix` (p. ej.
 `mlops-p2-dev-dvc-cache-<sufijo>`): son independientes de
-`mlops-p2-dvc-cache` y `mlops-p2-dataset-releases` (los buckets reales de
+`mlops-p2-dvc-cache-222629887955` y `mlops-p2-dataset-releases-222629887955` (los buckets reales de
 P2-04); no se referencian, importan ni modifican.
 
 `modules/network` agrega un `aws_vpc_endpoint` tipo Gateway para S3,
