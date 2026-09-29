@@ -121,9 +121,10 @@ permite ningún otro cambio.
 
 ## 9. S3 para modelos
 
-- Bucket nuevo `mlops-p3-*` que crea Emilio **en la cuenta `222629887955`**
-  (su rol `MLOpsP3` lo permite), con versionado activo. La ruta exacta se
-  anota aquí cuando exista.
+- Todos los buckets del proyecto viven en la cuenta de Karen (`222629887955`):
+  el remote DVC, los releases y el bucket nuevo de modelos `mlops-p3-*`, con
+  versionado activo. El equipo entra con IAM Identity Center (rol `MLOpsP3`).
+  La ruta exacta del bucket de modelos se anota aquí cuando exista.
 - Prefijo: `models/clasificador-perro-gato/<semver>/`.
 - Nunca se sobrescribe una versión publicada.
 
