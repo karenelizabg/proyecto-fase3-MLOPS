@@ -10,7 +10,7 @@
 
 | Campo | Valor |
 |---|---|
-| Release | `v0.1.1` |
+| Release | `v0.1.1`, la única versión que aprobó la compuerta de calidad (`v0.1.0` reprobó) |
 | Imágenes (`data/raw/images.dvc`) | `md5 951150dd4fb053f4665089fcb37a1c87.dir` · 600 archivos |
 | Anotaciones (`data/raw/annotations.dvc`) | `md5 c7cb86ae7ece94ef7b853620e464a4d7.dir` · 10 archivos |
 | Remote DVC | `s3://mlops-p2-dvc-cache-222629887955` |
@@ -21,10 +21,13 @@ La política de compuerta y los conteos útiles por clase los documenta P3-02
 
 ## 2. Clases
 
-- **Clases:** `cat` y `dog` (las dos categorías COCO del release).
+- **Clases:** `dog` (id COCO 3) y `cat` (id COCO 4), las dos categorías del
+  release.
 - **Exclusiones:** ninguna otra categoría. Se excluyen las cajas inválidas
-  (degeneradas o fuera de la imagen) y las imágenes faltantes; cada una queda en
-  `exclusions.csv` con su motivo (P3-04).
+  (degeneradas o fuera de la imagen; hoy hay 0) y las imágenes faltantes; cada
+  una queda en `exclusions.csv` con su motivo (P3-04).
+- **Advertencia de sesgo espacial** de la compuerta: se acepta y queda
+  documentada como limitación en la tarjeta del modelo.
 - **Unidad de clasificación:** un recorte por caja válida, nunca la imagen
   completa.
 - **Conteo en bruto** (antes de filtrar cajas inválidas): `dog` 300 imágenes
@@ -41,6 +44,8 @@ La política de compuerta y los conteos útiles por clase los documenta P3-02
 - **Cabeza:** `capas_ocultas` capas lineales de 256 unidades con ReLU y
   `dropout`, seguidas de `Linear(→ 2)`.
 - **Salida:** logits `[batch, 2]`; `class_map.json` = `{0: "cat", 1: "dog"}`.
+- **Por qué preentrenada:** con ~600 imágenes, entrenar desde cero difícilmente
+  llega al 85%.
 
 ## 4. Early stopping
 
@@ -55,7 +60,7 @@ La política de compuerta y los conteos útiles por clase los documenta P3-02
 ## 5. Métrica de selección
 
 - **Principal:** `val_accuracy` (mayor es mejor).
-- **Desempate:** `val_macro_f1`.
+- **Desempate:** `val_macro_f1`; si persiste, menor `val_loss`.
 - **Prohibido:** cualquier métrica `test_*`. `select.py` falla si la recibe.
 
 ## 6. Semillas
@@ -74,38 +79,47 @@ Las corridas son sobre el mismo manifiesto (P3-06).
 
 | Corrida | Optimizador | Batch | Épocas máx. | LR | Imagen | Capas ocultas | Dropout |
 |---|---|---|---|---|---|---|---|
-| r01 | adam | 32 | 10 | 1e-3 | 128 | 0 | 0.0 |
-| r02 | adam | 32 | 10 | 3e-4 | 128 | 1 | 0.3 |
-| r03 | adam | 16 | 10 | 1e-3 | 160 | 1 | 0.3 |
-| r04 | adam | 16 | 15 | 3e-4 | 160 | 0 | 0.3 |
-| r05 | sgd | 32 | 15 | 1e-2 | 128 | 1 | 0.0 |
-| r06 | sgd | 16 | 10 | 1e-2 | 160 | 0 | 0.3 |
-| r07 | sgd | 32 | 15 | 3e-3 | 160 | 1 | 0.3 |
-| r08 | adam | 32 | 15 | 1e-4 | 160 | 1 | 0.0 |
-| r09 | sgd | 16 | 15 | 1e-2 | 128 | 1 | 0.3 |
-| r10 | adam | 16 | 10 | 1e-3 | 128 | 1 | 0.5 |
+| r01 | adam | 32 | 15 | 1e-3 | 128 | 0 | 0.0 |
+| r02 | adam | 32 | 15 | 3e-4 | 128 | 1 | 0.3 |
+| r03 | adam | 16 | 15 | 1e-3 | 160 | 1 | 0.3 |
+| r04 | adam | 16 | 30 | 3e-4 | 160 | 0 | 0.3 |
+| r05 | sgd | 32 | 30 | 1e-2 | 128 | 1 | 0.0 |
+| r06 | sgd | 16 | 15 | 1e-2 | 160 | 0 | 0.3 |
+| r07 | sgd | 32 | 30 | 3e-3 | 160 | 1 | 0.3 |
+| r08 | adam | 32 | 30 | 1e-4 | 160 | 1 | 0.0 |
+| r09 | sgd | 16 | 30 | 1e-2 | 128 | 1 | 0.3 |
+| r10 | adam | 16 | 15 | 1e-3 | 128 | 1 | 0.5 |
 
 Valores por parámetro: optimizador {adam, sgd} · batch {16, 32} · épocas
-{10, 15} · LR {1e-4, 3e-4, 1e-3, 3e-3, 1e-2} · imagen {128, 160} · capas
+{15, 30} · LR {1e-4, 3e-4, 1e-3, 3e-3, 1e-2} · imagen {128, 160} · capas
 ocultas {0, 1} · dropout {0.0, 0.3, 0.5}. SGD usa `momentum = 0.9`.
 
 **Corridas extra r11–r12:** solo si la mejor `val_accuracy` de r01–r10 es menor
 que 0.90, y siempre antes de cerrar la selección.
 
-**Presupuesto de tiempo:** si el smoke test (P3-10) mide más de 15 minutos por
-corrida, antes de lanzar la campaña se reduce el tamaño de imagen a {112, 128}
-en un commit que cite esta sección. No se permite ningún otro cambio.
+**Presupuesto de cómputo:** la campaña la corre **Uriel en su Mac M3** (PyTorch
+con backend `mps`), en segundo plano y conectada a la corriente
+(`caffeinate -i`). Estimado: ~15 min por corrida como máximo, 30 épocas como
+tope; 10 corridas más la evaluación final suman unas 3–4 h. Si el smoke test
+(P3-10) mide más de 15 min por corrida, antes de lanzar la campaña se reduce
+el tamaño de imagen a {112, 128} en un commit que cite esta sección. No se
+permite ningún otro cambio.
 
 ## 8. MLflow
 
-- Servidor en `docker-compose.yml` (servicio `mlflow`) con almacén en
-  `./mlflow-store`.
-- El almacén se versiona con DVC (`scripts/snapshot_mlflow.sh`) después de la
-  campaña y después de la selección.
+- Servicio `mlflow` en `docker-compose.yml`, en `localhost:5050` (el puerto
+  5000 choca con AirPlay en macOS).
+- Registros en MariaDB y artefactos en el bucket `mlflow-artifacts` de MinIO,
+  ambos con volumen persistente.
+- Después de la campaña y de la selección se toma un snapshot (volcado de la
+  base y artefactos) versionado con DVC, para que se pueda restaurar en un clon
+  limpio.
 
 ## 9. S3 para modelos
 
-- Bucket en la cuenta `222629887955`, con versionado activo.
+- Bucket nuevo `mlops-p3-*` que crea Emilio **en la cuenta `222629887955`**
+  (su rol `MLOpsP3` lo permite), con versionado activo. La ruta exacta se
+  anota aquí cuando exista.
 - Prefijo: `models/clasificador-perro-gato/<semver>/`.
 - Nunca se sobrescribe una versión publicada.
 
@@ -118,5 +132,6 @@ en un commit que cite esta sección. No se permite ningún otro cambio.
 
 ## 11. Custodio del test
 
-**Uriel.** Solo él ejecuta `final.py --split test`, una única vez, después de
-que Karen declare **MODEL SELECTION CLOSED**.
+**Emilio.** Guarda el 10% de prueba "bajo llave": solo él ejecuta
+`final.py --split test`, una única vez, después de que Karen declare
+**MODEL SELECTION CLOSED**. Uriel, que corre la campaña, no toca el test.
