@@ -97,9 +97,13 @@ ocultas {0, 1} · dropout {0.0, 0.3, 0.5}. SGD usa `momentum = 0.9`.
 **Corridas extra r11–r12:** solo si la mejor `val_accuracy` de r01–r10 es menor
 que 0.90, y siempre antes de cerrar la selección.
 
-**Presupuesto de cómputo:** la campaña la corre **Uriel en su Mac M3** (PyTorch
-con backend `mps`), en segundo plano y conectada a la corriente
-(`caffeinate -i`). Estimado: ~15 min por corrida como máximo, 30 épocas como
+**Presupuesto de cómputo:** la campaña la corre **Uriel en su Mac M3 (4 CPU y
+8 GB de RAM)**, en segundo plano y conectada a la corriente (`caffeinate -i`).
+El entrenamiento corre en el contenedor `trainer-worker`, **solo con CPU**
+(Docker en macOS no expone la GPU `mps`), con `torch.set_num_threads(4)` y
+`num_workers = 2`. Docker Desktop necesita al menos 6 GB de RAM asignados; los
+demás servicios que no se usan durante la campaña (frontend, copilot) se
+detienen. Estimado: ~15 min por corrida como máximo, 30 épocas como
 tope; 10 corridas más la evaluación final suman unas 3–4 h. Si el smoke test
 (P3-10) mide más de 15 min por corrida, antes de lanzar la campaña se reduce
 el tamaño de imagen a {112, 128} en un commit que cite esta sección. No se
