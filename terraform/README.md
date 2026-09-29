@@ -98,14 +98,15 @@ fuera del código. Los estados, planes y variables locales están ignorados.
 El root independiente `bootstrap/github-oidc` define un IAM OIDC provider para
 `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`, y
 el rol `mlops-p2-github-oidc`. No depende de los módulos de P2-06 ni los despliega.
-No se adjuntan políticas de acceso a recursos al rol: este ticket comprueba solo
-autenticación. `sts:GetCallerIdentity` no necesita permisos adicionales.
+El rol tiene una sola política: lectura (`s3:ListBucket` y `s3:GetObject`) del
+remote DVC `mlops-p2-dvc-cache-222629887955`, para la compuerta de PROD del CI.
 
 La trust policy permite `sts:AssumeRoleWithWebIdentity` exclusivamente con
 `aud = sts.amazonaws.com` y
-`sub = repo:karenelizabg/proyecto-fase3-MLOPS:ref:refs/heads/main`.
-No permite otros repositorios, ramas, tags, pull requests ni subjects de GitHub
-Environments. El job OIDC no declara `environment` para conservar ese subject.
+`sub = repo:karenelizabg/proyecto-fase3-MLOPS:ref:refs/heads/main` o
+`sub = repo:karenelizabg/proyecto-fase3-MLOPS:pull_request` (GitHub no emite
+tokens OIDC para PRs desde forks). No permite otros repositorios, ramas, tags ni
+subjects de GitHub Environments. El job OIDC no declara `environment` para conservar ese subject.
 
 ### Validación estática y prueba real
 
