@@ -37,7 +37,7 @@ jobs:
     name: Verify AWS OIDC on main only
     needs: validate
     if: >-
-      github.repository == 'karenelizabg/proyecto-fase2-MLOPS' &&
+      github.repository == 'karenelizabg/proyecto-fase3-MLOPS' &&
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
