@@ -284,8 +284,8 @@ stages:
       nfiles: 17
     - path: crops
       hash: md5
-      md5: a76b71441af53739450cf10f48611de2.dir
-      size: 35536
+      md5: b6108e9b4d1182a86709786978dad2c4.dir
+      size: 36322
       nfiles: 7
     - path: dvc_crops_stage.py
       hash: md5

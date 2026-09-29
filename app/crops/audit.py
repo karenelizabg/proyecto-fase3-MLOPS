@@ -8,7 +8,7 @@ La comparación visual y la firma son humanas.
 
 import argparse
 import csv
-import random
+import hashlib
 import sys
 from pathlib import Path
 
@@ -31,10 +31,18 @@ def read_catalog(path: Path) -> list[dict]:
 def select_audit_samples(
     crops: list[dict], count: int = AUDIT_SAMPLES, seed: int = AUDIT_SEED
 ) -> list[dict]:
-    """Muestra determinística: misma lista y misma semilla dan los mismos recortes."""
+    """Muestra determinística: misma lista y misma semilla dan los mismos recortes.
+
+    Ordena por un hash `sha256` que incluye la semilla, en vez de `random`, para
+    no depender del generador pseudoaleatorio (evita el hallazgo S2245).
+    """
     if len(crops) <= count:
         return list(crops)
-    return random.Random(seed).sample(crops, count)
+
+    def rank(crop: dict) -> str:
+        return hashlib.sha256(f"{seed}:{crop['crop_id']}".encode()).hexdigest()
+
+    return sorted(crops, key=rank)[:count]
 
 
 def _source_with_box(sample: dict, images_dir: Path) -> Image.Image:
