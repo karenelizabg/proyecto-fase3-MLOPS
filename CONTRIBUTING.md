@@ -7,11 +7,11 @@ corregir.
 ## Flujo en cinco pasos
 
 1. **Un ticket = una rama = un PR.** No mezcles tickets en una misma rama salvo que el
-   propio ticket los agrupe (por ejemplo `P2-26 P2-27`).
+   propio ticket los agrupe (por ejemplo `P2-26 P2-27` o `P3-03 P3-05`).
 2. **Parte de `main` actualizado:**
    ```bash
    git fetch origin
-   git checkout -b p2-NN-descripcion origin/main
+   git checkout -b p3-NN-descripcion origin/main
    ```
 3. **Haz commits pequeños** con el formato de abajo.
 4. **Corre en local lo mismo que el CI** (tabla más abajo) antes de subir.
@@ -20,12 +20,14 @@ corregir.
 
 ## Ramas
 
-`p2-NN-descripcion`, todo en minúsculas y con guiones.
+`p2-NN-descripcion` o `p3-NN-descripcion` según de qué fase sea el ticket, todo en
+minúsculas y con guiones. Las dos conviven a la vez: `main` puede tener trabajo pendiente
+de P2 y de P3 al mismo tiempo.
 
 | Caso | Ejemplo |
 |---|---|
-| Un ticket | `p2-52-copilot-llm-client` |
-| Varios tickets | `p2-22-23-24-quality-gate-e2e`, `p2-26-p2-27-anotacion-lotes-7-8` |
+| Un ticket | `p2-52-copilot-llm-client`, `p3-03-infra-contratos` |
+| Varios tickets | `p2-22-23-24-quality-gate-e2e`, `p2-26-p2-27-anotacion-lotes-7-8`, `p3-03-p3-05-algo` |
 | Sin ticket | `fix/annotation-id-collisions`, `chore/gitignore-node-modules` |
 
 Los prefijos válidos para ramas sin ticket son `feat`, `fix`, `test`, `chore`, `docs`,
@@ -35,11 +37,12 @@ Los prefijos válidos para ramas sin ticket son `feat`, `fix`, `test`, `chore`, 
 
 ```
 P2-NN: qué cambia, en una línea
+P3-NN: qué cambia, en una línea
 fix: qué se arregla, en una línea
 ```
 
-- Formato `P2-NN: descripción` cuando hay ticket, o `tipo: descripción` cuando no
-  (mismos tipos que en las ramas).
+- Formato `P2-NN: descripción` o `P3-NN: descripción` cuando hay ticket, o
+  `tipo: descripción` cuando no (mismos tipos que en las ramas).
 - Primera línea de unos 72 caracteres, sin punto final. Español o inglés, como prefieras.
 - Si hace falta, deja una línea en blanco y explica **por qué** en el cuerpo: el qué ya
   lo dice el diff.
@@ -53,9 +56,9 @@ del PR (siguiente sección).
 ## Pull requests
 
 - **Título** con el mismo formato que un commit: `P2-52: Copilot con cliente LLM`,
-  `P2-22/23/24: compuerta de calidad`, `P2-26 P2-27: lotes 7 y 8` o
-  `fix: main tiene un test roto`. Ojo con `P2-52 - texto`, `P2 52 texto` o `P2-52 texto`:
-  no cumplen.
+  `P3-03: Infraestructura y contratos`, `P2-22/23/24: compuerta de calidad`,
+  `P2-26 P2-27: lotes 7 y 8` o `fix: main tiene un test roto`. Ojo con `P2-52 - texto`,
+  `P2 52 texto` o `P2-52 texto`: no cumplen.
 - **Descripción:** completa la plantilla. Di qué probaste **y qué no pudiste probar**.
 - **Cierra el issue** con `Cierra #NN` en la descripción.
 - Si tu PR **depende de otro sin mergear**, apúntalo a la rama de ese ticket en vez de
@@ -69,7 +72,7 @@ título basta editarlo en GitHub: el job se vuelve a correr solo. Para comprobar
 abrir el PR:
 
 ```bash
-bash .github/scripts/check-naming.sh "$(git branch --show-current)" "P2-NN: mi título"
+bash .github/scripts/check-naming.sh "$(git branch --show-current)" "P3-NN: mi título"
 ```
 
 ## Qué corre el CI
