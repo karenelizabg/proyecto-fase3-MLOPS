@@ -1,8 +1,12 @@
+import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from crops.counts import count_original_images_per_class
+from crops.counts import count_original_images_per_class, main
+from ingestion.loader import load_dataset, load_raw_dataset
 from policies.invalid_boxes import load_invalid_box_config
 
 
@@ -154,3 +158,41 @@ def test_result_is_deterministic_and_input_not_mutated():
     second = count_original_images_per_class(coco, config)
     assert first == second
     assert coco == before
+
+
+def _write_document(tmp_path: Path, document: dict) -> Path:
+    annotations_dir = tmp_path / "annotations"
+    annotations_dir.mkdir()
+    (annotations_dir / "lote.json").write_text(json.dumps(document), encoding="utf-8")
+    return annotations_dir
+
+
+def test_raw_loader_keeps_the_degenerate_box_that_strict_load_rejects(tmp_path):
+    annotations_dir = _write_document(tmp_path, _document())
+
+    raw = load_raw_dataset(annotations_dir)
+    assert any(annotation["bbox"][2] <= 0 for annotation in raw["annotations"])
+
+    with pytest.raises(ValidationError):
+        load_dataset(annotations_dir)
+
+
+def test_counts_filter_degenerate_box_from_a_raw_dataset(tmp_path):
+    raw = load_raw_dataset(_write_document(tmp_path, _document()))
+
+    result = count_original_images_per_class(raw, load_invalid_box_config())
+    assert result["categories"][0]["image_ids"] == [1, 3]
+    assert result["categories"][1]["image_ids"] == [2]
+    assert result["total_original_images"] == 3
+
+
+def test_cli_counts_a_dataset_with_invalid_boxes_without_crashing(tmp_path, capsys):
+    annotations_dir = _write_document(tmp_path, _document())
+
+    exit_code = main(["--annotations-dir", str(annotations_dir)])
+
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["categories"][0]["image_count"] == 2
+    assert payload["categories"][1]["image_count"] == 1
+    assert payload["invalid_annotations"] == 2

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from analyzers.invalid_boxes import InvalidBoxConfig, analyze_invalid_boxes
-from ingestion.loader import load_dataset
+from ingestion.loader import load_raw_dataset
 from policies.invalid_boxes import load_invalid_box_config
 
 
@@ -76,10 +76,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    coco = load_dataset(args.annotations_dir)
-    counts = count_original_images_per_class(
-        coco.model_dump(), load_invalid_box_config(args.quality)
-    )
+    coco = load_raw_dataset(args.annotations_dir)
+    counts = count_original_images_per_class(coco, load_invalid_box_config(args.quality))
     print(json.dumps(counts, indent=2, ensure_ascii=False))
     return 0
 
