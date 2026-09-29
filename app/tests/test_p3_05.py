@@ -1,12 +1,12 @@
+import numpy as np
 import pytest
 import torch
-import numpy as np
 from PIL import Image
 from pydantic import ValidationError
-
 from training.config import TrainingConfig
 from training.model import build_model
 from training.preprocess import get_preprocessing_transforms
+
 
 def test_config_invalid_values_rejected_with_field_name():
     with pytest.raises(ValidationError) as exc_info:

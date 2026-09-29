@@ -1,5 +1,6 @@
 from torchvision import transforms
 
+
 def get_preprocessing_transforms(image_size: int) -> transforms.Compose:
     return transforms.Compose([
         transforms.Resize((image_size, image_size)),

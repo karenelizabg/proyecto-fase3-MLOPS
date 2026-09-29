@@ -1,5 +1,7 @@
 import json
-from pydantic import BaseModel, Field, ConfigDict
+
+from pydantic import BaseModel, ConfigDict, Field
+
 
 class TrainingConfig(BaseModel):
     model_config = ConfigDict(strict=True)

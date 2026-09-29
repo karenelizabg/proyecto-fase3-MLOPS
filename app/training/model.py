@@ -1,7 +1,9 @@
 import json
+
 import torch.nn as nn
-from torchvision.models import resnet18, ResNet18_Weights
+from torchvision.models import ResNet18_Weights, resnet18
 from training.config import TrainingConfig
+
 
 def build_model(config: TrainingConfig) -> nn.Module:
     model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
@@ -26,9 +28,19 @@ def build_model(config: TrainingConfig) -> nn.Module:
         
     return model
 
-def export_architecture_and_class_map(arch_path: str = "architecture.json", class_map_path: str = "class_map.json"):
+def export_architecture_and_class_map(
+    arch_path: str = "architecture.json", 
+    class_map_path: str = "class_map.json"
+):
     with open(arch_path, "w") as f:
-        json.dump({"base_model": "resnet18", "pretrained": "IMAGENET1K_V1", "head": "configurable"}, f)
+        json.dump(
+            {
+                "base_model": "resnet18",
+                "pretrained": "IMAGENET1K_V1",
+                "head": "configurable"
+            },
+            f
+        )
         
     with open(class_map_path, "w") as f:
         json.dump({"3": "dog", "4": "cat"}, f)
