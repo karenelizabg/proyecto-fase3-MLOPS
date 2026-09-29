@@ -137,6 +137,7 @@ permite ningún otro cambio.
 
 ## 11. Custodio del test
 
-**Emilio.** Guarda el 10% de prueba "bajo llave": solo él ejecuta
-`final.py --split test`, una única vez, después de que Karen declare
-**MODEL SELECTION CLOSED**. Uriel, que corre la campaña, no toca el test.
+**Karen.** Guarda el 10% de prueba "bajo llave" y es dueña de la cuenta donde
+viven los buckets. Solo ella ejecuta `final.py --split test`, una única vez,
+después de declarar **MODEL SELECTION CLOSED**. Uriel, que corre la campaña y
+prepara la selección, no toca el test.
