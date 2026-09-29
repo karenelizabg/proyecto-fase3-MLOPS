@@ -160,9 +160,9 @@ stages:
       nfiles: 7
     - path: policies
       hash: md5
-      md5: 29aae2b11f14d836844060daf164e71a.dir
-      size: 8315
-      nfiles: 10
+      md5: bd4b688b3364751b525ac8506c0d028c.dir
+      size: 9117
+      nfiles: 11
     - path: presentation/contracts.py
       hash: md5
       md5: 24a51d6f65165cc4377911bf659dbaf2
@@ -235,9 +235,9 @@ stages:
       nfiles: 7
     - path: policies
       hash: md5
-      md5: 29aae2b11f14d836844060daf164e71a.dir
-      size: 8315
-      nfiles: 10
+      md5: bd4b688b3364751b525ac8506c0d028c.dir
+      size: 9117
+      nfiles: 11
     - path: presentation/contracts.py
       hash: md5
       md5: 24a51d6f65165cc4377911bf659dbaf2
@@ -264,3 +264,54 @@ stages:
       hash: md5
       md5: 1091469105770e8c3fcb41f10dc4a844
       size: 645
+  crops:
+    cmd: uv run python dvc_crops_stage.py
+    deps:
+    - path: ../data/raw/annotations
+      hash: md5
+      md5: c7cb86ae7ece94ef7b853620e464a4d7.dir
+      size: 256669
+      nfiles: 10
+    - path: ../data/raw/images
+      hash: md5
+      md5: 951150dd4fb053f4665089fcb37a1c87.dir
+      size: 13556278
+      nfiles: 600
+    - path: analyzers
+      hash: md5
+      md5: 574389b3e81d80db69fa747c2fc75a8a.dir
+      size: 64410
+      nfiles: 17
+    - path: crops
+      hash: md5
+      md5: a76b71441af53739450cf10f48611de2.dir
+      size: 35536
+      nfiles: 7
+    - path: dvc_crops_stage.py
+      hash: md5
+      md5: dbede3ff202ee4c0857384b75aa54d07
+      size: 995
+    - path: ingestion
+      hash: md5
+      md5: 8c500329f0b91fb8b875c4fe7bcdf74b.dir
+      size: 18035
+      nfiles: 7
+    - path: policies
+      hash: md5
+      md5: bd4b688b3364751b525ac8506c0d028c.dir
+      size: 9117
+      nfiles: 11
+    - path: pyproject.toml
+      hash: md5
+      md5: 506b3fe172c91715a5e6f4b38ee9d3ac
+      size: 1300
+    - path: uv.lock
+      hash: md5
+      md5: 27f68d5ad4e453843b6646f06058a9c8
+      size: 114274
+    outs:
+    - path: ../data/derived/crops
+      hash: md5
+      md5: 4531108b6a9c14abc12f7e2d718be403.dir
+      size: 22211810
+      nfiles: 670
