@@ -103,9 +103,10 @@ remote DVC `mlops-p2-dvc-cache-222629887955`, para la compuerta de PROD del CI.
 
 La trust policy permite `sts:AssumeRoleWithWebIdentity` exclusivamente con
 `aud = sts.amazonaws.com` y
-`sub = repo:karenelizabg/proyecto-fase3-MLOPS:ref:refs/heads/main` o
-`sub = repo:karenelizabg/proyecto-fase3-MLOPS:pull_request` (GitHub no emite
-tokens OIDC para PRs desde forks). No permite otros repositorios, ramas, tags ni
+`sub = repo:karenelizabg@153574034/proyecto-fase3-MLOPS@1381627489:ref:refs/heads/main` o
+`sub = repo:karenelizabg@153574034/proyecto-fase3-MLOPS@1381627489:pull_request` (GitHub no emite
+tokens OIDC para PRs desde forks). El repo usa subjects inmutables de GitHub
+(`owner@id/repo@id`), por eso los IDs numéricos. No permite otros repositorios, ramas, tags ni
 subjects de GitHub Environments. El job OIDC no declara `environment` para conservar ese subject.
 
 ### Validación estática y prueba real

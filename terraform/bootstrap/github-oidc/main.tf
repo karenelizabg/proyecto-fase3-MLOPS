@@ -25,8 +25,8 @@ resource "aws_iam_role" "github_actions" {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
           "token.actions.githubusercontent.com:sub" = [
-            "repo:karenelizabg/proyecto-fase3-MLOPS:ref:refs/heads/main",
-            "repo:karenelizabg/proyecto-fase3-MLOPS:pull_request",
+            "repo:karenelizabg@153574034/proyecto-fase3-MLOPS@1381627489:ref:refs/heads/main",
+            "repo:karenelizabg@153574034/proyecto-fase3-MLOPS@1381627489:pull_request",
           ]
         }
       }
