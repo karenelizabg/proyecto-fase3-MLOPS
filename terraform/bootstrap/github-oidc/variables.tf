@@ -11,3 +11,9 @@ variable "existing_oidc_provider_arn" {
     error_message = "Provide a GitHub OIDC provider ARN or leave null to define a new provider."
   }
 }
+
+variable "dvc_bucket_name" {
+  description = "Bucket of the DVC prod remote that CI may read."
+  type        = string
+  default     = "mlops-p2-dvc-cache-222629887955"
+}
