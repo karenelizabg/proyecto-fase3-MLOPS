@@ -14,7 +14,7 @@
 | Imágenes (`data/raw/images.dvc`) | `md5 951150dd4fb053f4665089fcb37a1c87.dir` · 600 archivos |
 | Anotaciones (`data/raw/annotations.dvc`) | `md5 c7cb86ae7ece94ef7b853620e464a4d7.dir` · 10 archivos |
 | Remote DVC | `s3://mlops-p2-dvc-cache-222629887955` |
-| Baseline de P2 | commit `9cfea4c`, tag `p2-final-baseline` |
+| Baseline de P2 | commit `9cfea4c`, tag `p2-final-baseline` = [`karenelizabg/proyecto-fase2-MLOPS@849c812`](https://github.com/karenelizabg/proyecto-fase2-MLOPS/commit/849c8120bd1b8fbc5c2fa40bdf390d16d62ec57f) (entrega final de P2, calificada con 99) |
 
 La política de compuerta y los conteos útiles por clase los documenta P3-02
 (#5) en la sección "Política de compuerta" de este archivo.
