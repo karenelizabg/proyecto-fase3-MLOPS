@@ -7,6 +7,7 @@ columna futura corre el mismo riesgo, y un SQL crudo no se defiende solo.
 """
 
 import json
+import uuid
 from collections.abc import Sequence
 
 from sqlalchemy import Engine, text
@@ -53,3 +54,44 @@ def list_training_jobs(engine: Engine) -> list[TrainingJob]:
     with engine.connect() as connection:
         rows = connection.execute(query).fetchall()
     return [_row_to_job(row) for row in rows]
+
+
+def create_training_job(
+    engine: Engine, *, dataset_release: str, manifest_id: str, config: dict
+) -> TrainingJob:
+    """Inserta un `training_job` en `queued` y devuelve la fila creada.
+
+    El `id` se genera aquí (no lo asigna MariaDB): a diferencia de un
+    autoincremental, un uuid no revela cuántos entrenamientos se han lanzado.
+    """
+    job = TrainingJob(
+        id=uuid.uuid4().hex,
+        status="queued",
+        progress=0.0,
+        config=config,
+        dataset_release=dataset_release,
+        manifest_id=manifest_id,
+        mlflow_run_id=None,
+        error=None,
+        logs=[],
+        heartbeat_at=None,
+    )
+    query = text(
+        "INSERT INTO `training_jobs` "
+        "(`id`, `status`, `progress`, `config`, `dataset_release`, `manifest_id`, `logs`) "
+        "VALUES (:id, :status, :progress, :config, :dataset_release, :manifest_id, :logs)"
+    )
+    with engine.begin() as connection:
+        connection.execute(
+            query,
+            {
+                "id": job.id,
+                "status": job.status,
+                "progress": job.progress,
+                "config": json.dumps(job.config),
+                "dataset_release": job.dataset_release,
+                "manifest_id": job.manifest_id,
+                "logs": json.dumps(job.logs),
+            },
+        )
+    return job

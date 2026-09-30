@@ -1,8 +1,12 @@
-"""`ml_api.server` (P3-03): /health, /training/jobs (real) y los 4 endpoints pendientes.
+"""`ml_api.server` (P3-03/P3-09): /health, /training/jobs (GET+POST) y los 4
+endpoints pendientes.
 
-`list_jobs` se inyecta -- igual que `create_message` en `copilot/server.py` --
-así esta prueba nunca toca una MariaDB real; eso lo cubre
-`test_ml_api_repository.py` con datos tomados de una corrida real.
+`list_jobs`/`create_job` se inyectan -- igual que `create_message` en
+`copilot/server.py` -- así esta prueba nunca toca una MariaDB real; eso lo
+cubre `test_ml_api_repository.py` con datos tomados de una corrida real. La
+validación de `POST /training/jobs` (release/manifiesto/fuga) sí corre de
+verdad, contra los archivos que escribe `write_manifest` -- es la pieza que
+este ticket (P3-09) tiene que probar, no un detalle de infraestructura.
 """
 
 from datetime import datetime
@@ -12,11 +16,19 @@ from starlette.testclient import TestClient
 from ml_api.contracts import TrainingJob
 from ml_api.server import create_app
 from tests._mcp_fixtures import mcp_settings
+from tests._training_job_fixtures import VALID_TRAINING_CONFIG, write_manifest
 
 
-def client_for(monkeypatch, tmp_path, *, jobs: list[TrainingJob] | None = None) -> TestClient:
-    settings = mcp_settings(monkeypatch, tmp_path / "dataset", tmp_path / "reports")
-    return TestClient(create_app(settings, list_jobs=lambda: jobs or []))
+def client_for(
+    monkeypatch,
+    tmp_path,
+    *,
+    jobs: list[TrainingJob] | None = None,
+    create_job=None,
+) -> TestClient:
+    derived_dir = tmp_path / "derived"
+    settings = mcp_settings(monkeypatch, tmp_path / "dataset", tmp_path / "reports", derived_dir)
+    return TestClient(create_app(settings, list_jobs=lambda: jobs or [], create_job=create_job))
 
 
 def a_job(**overrides) -> TrainingJob:
@@ -74,3 +86,113 @@ def test_the_four_pending_endpoints_name_their_own_ticket(monkeypatch, tmp_path)
         body = response.json()
         assert body["status"] == "pending"
         assert body["ticket"] == ticket
+
+
+class _RecordingCreateJob:
+    """Espía: prueba que ninguna fila se crea cuando la solicitud se rechaza."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def __call__(self, dataset_release, manifest_id, config):
+        self.calls.append((dataset_release, manifest_id, config))
+        return a_job(
+            id="new-job",
+            status="queued",
+            progress=0.0,
+            dataset_release=dataset_release,
+            manifest_id=manifest_id,
+            config=config,
+            logs=[],
+        )
+
+
+def test_create_job_rejects_invalid_config_without_creating_a_row(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    write_manifest(reports_dir=tmp_path / "reports", derived_dir=tmp_path / "derived")
+
+    bad_config = {**VALID_TRAINING_CONFIG, "batch_size": 7}  # 7 no es 16 ni 32
+    response = client.post(
+        "/training/jobs", json={"dataset_release": "v0.1.1", "config": bad_config}
+    )
+
+    assert response.status_code == 400
+    assert recorder.calls == []
+
+
+def test_create_job_rejects_unknown_release_without_creating_a_row(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    # Ningún manifest_meta.json escrito para "v9.9.9": no existe el release.
+
+    response = client.post(
+        "/training/jobs",
+        json={"dataset_release": "v9.9.9", "config": VALID_TRAINING_CONFIG},
+    )
+
+    assert response.status_code == 400
+    assert recorder.calls == []
+
+
+def test_create_job_rejects_a_failed_release_without_creating_a_row(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    write_manifest(
+        reports_dir=tmp_path / "reports", derived_dir=tmp_path / "derived", quality_status="failed"
+    )
+
+    response = client.post(
+        "/training/jobs",
+        json={"dataset_release": "v0.1.1", "config": VALID_TRAINING_CONFIG},
+    )
+
+    assert response.status_code == 400
+    assert "failed" in response.json()["error"]
+    assert recorder.calls == []
+
+
+def test_create_job_rejects_a_leaking_manifest_without_creating_a_row(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    write_manifest(reports_dir=tmp_path / "reports", derived_dir=tmp_path / "derived", leaking=True)
+
+    response = client.post(
+        "/training/jobs",
+        json={"dataset_release": "v0.1.1", "config": VALID_TRAINING_CONFIG},
+    )
+
+    assert response.status_code == 400
+    assert "fuga" in response.json()["error"]
+    assert recorder.calls == []
+
+
+def test_create_job_accepts_a_valid_request_and_creates_exactly_one_row(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    manifest_id = write_manifest(
+        reports_dir=tmp_path / "reports", derived_dir=tmp_path / "derived", quality_status="warning"
+    )
+
+    response = client.post(
+        "/training/jobs",
+        json={"dataset_release": "v0.1.1", "config": VALID_TRAINING_CONFIG},
+    )
+
+    assert response.status_code == 201
+    assert len(recorder.calls) == 1
+    called_release, called_manifest_id, called_config = recorder.calls[0]
+    assert called_release == "v0.1.1"
+    assert called_manifest_id == manifest_id
+    assert called_config == VALID_TRAINING_CONFIG
+    assert response.json()["status"] == "queued"
+
+
+def test_create_job_rejects_a_non_object_body(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+
+    response = client.post("/training/jobs", json=[1, 2, 3])
+
+    assert response.status_code == 400
+    assert recorder.calls == []

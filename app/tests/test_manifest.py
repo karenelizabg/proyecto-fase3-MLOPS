@@ -12,6 +12,10 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from PIL import Image
+
+from analyzers.duplicates import DuplicateConfig, analyze_duplicates
+from crops.build import plan_crops
 from manifest.build import (
     MANIFEST_FIELDS,
     ManifestError,
@@ -21,10 +25,6 @@ from manifest.build import (
 from manifest.check_leakage import find_leakage
 from manifest.check_leakage import main as check_leakage_main
 from manifest.config import ManifestConfig, load_manifest_config
-from PIL import Image
-
-from analyzers.duplicates import DuplicateConfig, analyze_duplicates
-from crops.build import plan_crops
 from policies.invalid_boxes import load_invalid_box_config
 from splits.models import load_splits_config
 

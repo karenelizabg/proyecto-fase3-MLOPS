@@ -9,6 +9,7 @@ x-pipeline-env: &pipeline-env
   MINIO_BUCKET: image-annotations
   DATASET_DIR: /app/data/raw
   REPORTS_DIR: /app/reports
+  DERIVED_DIR: /app/data/derived
 
 services:
   mariadb:
@@ -236,6 +237,11 @@ services:
       <<: *pipeline-env
       MLFLOW_TRACKING_URI: http://mlflow:5000
       ML_API_HOST: 0.0.0.0
+    volumes:
+      # P3-09: solo lectura -- ml-api valida (reports/releases, manifest.csv),
+      # nunca escribe el dataset derivado.
+      - ./data/derived:/app/data/derived:ro
+      - ./reports:/app/reports:ro
     restart: on-failure:5
 
 volumes:
