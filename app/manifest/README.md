@@ -7,7 +7,7 @@ de particiones para el entrenamiento de P3; el 70/15/15 de P2
 ```bash
 dvc repro manifest            # corre `crops` si hace falta y luego el manifiesto
 cd app && uv run python -m manifest.check_leakage \
-  --manifest ../data/derived/manifests/v0.1.1/manifest.csv   # código ≠ 0 si hay fuga
+  --release v0.1.1            # código ≠ 0 si hay fuga
 dvc push -r prod              # sube manifest.csv (y los recortes) al remote
 ```
 

@@ -363,8 +363,8 @@ stages:
       size: 9560
     - path: manifest/check_leakage.py
       hash: md5
-      md5: c07f0260938cfaa175d2dec435e1817f
-      size: 1933
+      md5: 8b6d6da7c557bc4f8b5c606b7046a498
+      size: 2905
     - path: manifest/config.py
       hash: md5
       md5: 853790d97fb9b4f74bdee69e34883f4c

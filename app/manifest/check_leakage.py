@@ -1,18 +1,24 @@
 """P3-06: verifica que ningún recorte, imagen de origen ni grupo cruce particiones.
 
-    uv run python -m manifest.check_leakage --manifest ../data/derived/manifests/v0.1.1/manifest.csv
+    uv run python -m manifest.check_leakage --release v0.1.1
 
-Imprime un JSON con las intersecciones y termina con código 1 si hay fuga.
+Lee `data/derived/manifests/<release>/manifest.csv`, imprime un JSON con las
+intersecciones y termina con código 1 si hay fuga. No acepta rutas libres: el
+release se valida y el archivo tiene que quedar dentro del directorio de
+manifiestos.
 """
 
 import argparse
 import csv
 import json
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 LEAKAGE_KEYS = ("crop_id", "source_image_id", "duplicate_group_id")
+RELEASE_PATTERN = re.compile(r"v\d+\.\d+\.\d+")
+MANIFESTS_DIR = Path(__file__).resolve().parents[2] / "data" / "derived" / "manifests"
 
 
 def find_leakage(rows: Sequence[Mapping]) -> dict[str, list[dict]]:
@@ -35,18 +41,34 @@ def read_manifest(path: Path) -> list[dict]:
         return list(csv.DictReader(handle))
 
 
-def main(argv: list[str] | None = None) -> int:
+def manifest_path(release: str, manifests_dir: Path = MANIFESTS_DIR) -> Path:
+    """Ruta de `manifest.csv` de un release, sin salir de `manifests_dir`."""
+    if not RELEASE_PATTERN.fullmatch(release):
+        raise ValueError(f"release inválido: {release!r} (se espera vMAYOR.MENOR.PARCHE)")
+    base = manifests_dir.resolve()
+    path = (base / release / "manifest.csv").resolve()
+    if not path.is_relative_to(base):
+        raise ValueError(f"{path} queda fuera de {base}")
+    return path
+
+
+def main(argv: list[str] | None = None, *, manifests_dir: Path = MANIFESTS_DIR) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True, help="Ruta a manifest.csv.")
+    parser.add_argument("--release", required=True, help="Release del manifiesto, p. ej. v0.1.1.")
     args = parser.parse_args(argv)
 
-    rows = read_manifest(args.manifest)
+    try:
+        path = manifest_path(args.release, manifests_dir)
+    except ValueError as error:
+        print(f"check_leakage: {error}", file=sys.stderr)
+        return 2
+    rows = read_manifest(path)
     leakage = find_leakage(rows)
     leaked = any(leakage.values())
     print(
         json.dumps(
             {
-                "manifest": str(args.manifest),
+                "manifest": str(path),
                 "rows": len(rows),
                 "leakage": leaked,
                 "intersections": {key: len(values) for key, values in leakage.items()},

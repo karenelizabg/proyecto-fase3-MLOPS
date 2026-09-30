@@ -210,15 +210,18 @@ def test_catalog_with_an_invalid_box_is_rejected():
 
 
 def test_deviation_above_tolerance_fails():
+    strict = _config(max_deviation_pp=0.01)
     with pytest.raises(ManifestError, match="pp"):
-        _build(_config(max_deviation_pp=0.01))
+        _build(strict)
 
 
-def test_config_rejects_ratios_that_do_not_sum_one_and_bad_release():
-    with pytest.raises(ValueError, match=r"sumar 1\.0"):
-        _config(test=0.2)
-    with pytest.raises(ValueError, match="release"):
-        _config(release="latest")
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [({"test": 0.2}, r"sumar 1\.0"), ({"release": "latest"}, "release")],
+)
+def test_config_rejects_bad_ratios_and_release(override: dict, message: str):
+    with pytest.raises(ValueError, match=message):
+        _config(**override)
 
 
 def test_repository_config_is_70_20_10_and_p2_splits_untouched():
@@ -253,17 +256,22 @@ def test_find_leakage_detects_each_kind(result, column):
 
 
 def test_check_leakage_cli_exit_codes(result, tmp_path: Path, capsys):
-    clean = tmp_path / "clean.csv"
-    clean.write_bytes(manifest_csv_bytes(result.rows))
-    assert check_leakage_main(["--manifest", str(clean)]) == 0
+    (tmp_path / "v0.1.1").mkdir()
+    (tmp_path / "v0.1.1" / "manifest.csv").write_bytes(manifest_csv_bytes(result.rows))
+    assert check_leakage_main(["--release", "v0.1.1"], manifests_dir=tmp_path) == 0
     assert json.loads(capsys.readouterr().out)["leakage"] is False
 
     rows = [dict(row) for row in result.rows]
     val = next(r for r in rows if r["split"] == "val")
     next(r for r in rows if r["split"] == "train")["source_image_id"] = val["source_image_id"]
-    leaky = tmp_path / "leaky.csv"
-    leaky.write_bytes(manifest_csv_bytes(rows))
-    assert check_leakage_main(["--manifest", str(leaky)]) != 0
+    (tmp_path / "v9.9.9").mkdir()
+    (tmp_path / "v9.9.9" / "manifest.csv").write_bytes(manifest_csv_bytes(rows))
+    assert check_leakage_main(["--release", "v9.9.9"], manifests_dir=tmp_path) == 1
+
+
+@pytest.mark.parametrize("release", ["../../etc", "v0.1.1/../../x", "/tmp/v0.1.1", "latest"])
+def test_check_leakage_cli_rejects_paths_outside_the_manifests_dir(tmp_path: Path, release: str):
+    assert check_leakage_main(["--release", release], manifests_dir=tmp_path) == 2
 
 
 def test_stage_writes_manifest_meta_and_counts(tmp_path: Path, monkeypatch):
@@ -334,5 +342,6 @@ def test_stage_refuses_a_failed_quality_reference(tmp_path: Path, monkeypatch):
         json.dumps({"dataset_version": "v0.1.1", "status": "failed"})
     )
     monkeypatch.setattr(stage, "REPORTS_DIR", reports)
+    config = _config()
     with pytest.raises(ManifestError, match="failed"):
-        stage.quality_reference(_config())
+        stage.quality_reference(config)
