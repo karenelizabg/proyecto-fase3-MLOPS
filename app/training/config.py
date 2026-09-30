@@ -1,10 +1,11 @@
 import json
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class TrainingConfig(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid")
     optimizer: Literal["adam", "sgd"]
     batch_size: Literal[16, 32]
     max_epochs: Literal[15, 30]
