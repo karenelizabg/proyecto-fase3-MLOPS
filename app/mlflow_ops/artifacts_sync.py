@@ -25,9 +25,15 @@ def backup(local_dir: Path, *, bucket: str = MLFLOW_ARTIFACTS_BUCKET) -> int:
     client = get_minio_client()
     local_dir.mkdir(parents=True, exist_ok=True)
 
+    local_dir_resolved = local_dir.resolve()
     count = 0
     for obj in client.list_objects(bucket, recursive=True):
-        destination = local_dir / obj.object_name
+        destination = (local_dir / obj.object_name).resolve()
+        if not destination.is_relative_to(local_dir_resolved):
+            # No debería pasar (nosotros mismos escribimos los nombres de objeto
+            # en `restore()`), pero el nombre de objeto lo decide el bucket, no
+            # esta función -- no confiar en que nunca traiga un "../".
+            raise ValueError(f"nombre de objeto fuera de {local_dir}: {obj.object_name!r}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         client.fget_object(bucket, obj.object_name, str(destination))
         count += 1

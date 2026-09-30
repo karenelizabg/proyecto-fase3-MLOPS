@@ -235,6 +235,7 @@ services:
     environment:
       <<: *pipeline-env
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      ML_API_HOST: 0.0.0.0
     restart: on-failure:5
 
 volumes:

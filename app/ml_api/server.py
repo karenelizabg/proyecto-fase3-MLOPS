@@ -76,7 +76,7 @@ def create_app(settings: Settings | None = None, *, list_jobs: ListJobs | None =
 def main() -> None:
     settings = Settings()
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run(create_app(settings), host="0.0.0.0", port=8100)
+    uvicorn.run(create_app(settings), host=settings.ml_api_host, port=settings.ml_api_port)
 
 
 if __name__ == "__main__":

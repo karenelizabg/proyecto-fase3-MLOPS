@@ -128,6 +128,7 @@ jobs:
           MARIADB_ROOT_PASSWORD: ci
           MINIO_ROOT_USER: ci
           MINIO_ROOT_PASSWORD: ci
+          AWS_PROFILE: ci
         run: docker compose config --quiet
 
   quality-gate:
