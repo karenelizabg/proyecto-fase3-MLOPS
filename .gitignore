@@ -10,6 +10,9 @@
 # Credenciales específicas de DVC; nunca se comparten con Git.
 .dvc/config.local
 
+# Datos derivados (recortes COCO); viven en DVC, no en Git.
+data/derived/
+
 # Terraform local artifacts at any depth; provider lockfiles remain versioned.
 .terraform/
 *.tfstate
