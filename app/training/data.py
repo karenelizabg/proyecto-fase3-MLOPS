@@ -22,12 +22,11 @@ class ManifestDataset(Dataset):
         base_dir: str,
         split: str,
         image_size: int,
-        seed_aug: int | None = None,
     ):
-        df = pd.read_csv(manifest_path)
+        self.df = pd.read_csv(manifest_path)
         self.data = df[df["split"] == split].reset_index(drop=True)
         self.base_dir = base_dir
-        self.transform = get_preprocessing_transforms(split, image_size, seed_aug)
+        self.transform = get_preprocessing_transforms(split, image_size)
 
     def __len__(self):
         return len(self.data)
@@ -50,6 +49,7 @@ def create_dataloader(
     image_size: int,
     seed_train: int,
     seed_aug: int | None = None,
+    num_workers: int = 2
 ):
     dataset = ManifestDataset(manifest_path, base_dir, split, image_size, seed_aug)
 
@@ -69,10 +69,10 @@ def create_dataloader(
             batch_size=batch_size,
             sampler=sampler,
             generator=g_aug,
-            num_workers=2,
+            num_workers=num_workers,
             worker_init_fn=seed_worker,
         )
     else:
         return DataLoader(
-            dataset, batch_size=batch_size, shuffle=False, num_workers=2, worker_init_fn=seed_worker
+            dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, worker_init_fn=seed_worker
         )
