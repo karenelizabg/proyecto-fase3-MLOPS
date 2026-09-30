@@ -23,7 +23,11 @@ logger = logging.getLogger("mlflow-ops")
 def backup(local_dir: Path, *, bucket: str = MLFLOW_ARTIFACTS_BUCKET) -> int:
     """Descarga cada objeto del bucket a `local_dir`, conservando su ruta."""
     client = get_minio_client()
-    local_dir.mkdir(parents=True, exist_ok=True)
+    # NOSONAR (pythonsecurity:S8707): `local_dir` llega de `main()`/argparse, no de
+    # un request HTTP -- este módulo no tiene ningún endpoint, solo se invoca por
+    # `docker compose run` (ver scripts/snapshot_mlflow.sh). El nombre de objeto del
+    # bucket sí se valida abajo, que es el dato con origen externo real aquí.
+    local_dir.mkdir(parents=True, exist_ok=True)  # NOSONAR
 
     local_dir_resolved = local_dir.resolve()
     count = 0
