@@ -23,7 +23,7 @@ class ManifestDataset(Dataset):
         split: str,
         image_size: int,
     ):
-        self.df = pd.read_csv(manifest_path)
+        df = pd.read_csv(manifest_path)
         self.data = df[df["split"] == split].reset_index(drop=True)
         self.base_dir = base_dir
         self.transform = get_preprocessing_transforms(split, image_size)
@@ -49,9 +49,9 @@ def create_dataloader(
     image_size: int,
     seed_train: int,
     seed_aug: int | None = None,
-    num_workers: int = 2
+    num_workers: int = 2,
 ):
-    dataset = ManifestDataset(manifest_path, base_dir, split, image_size, seed_aug)
+    dataset = ManifestDataset(manifest_path, base_dir, split, image_size)
 
     g_aug = torch.Generator()
     if seed_aug is not None:
@@ -74,5 +74,9 @@ def create_dataloader(
         )
     else:
         return DataLoader(
-            dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, worker_init_fn=seed_worker
+            dataset,
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers,
+            worker_init_fn=seed_worker,
         )
