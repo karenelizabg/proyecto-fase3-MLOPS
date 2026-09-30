@@ -27,6 +27,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/copilot-api/, ""),
       },
+      // P3-03: ml-api (`python -m ml_api.server` en app/, puerto 8100).
+      "/ml-api": {
+        target: "http://localhost:8100",
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/ml-api/, ""),
+      },
     },
   },
 });
