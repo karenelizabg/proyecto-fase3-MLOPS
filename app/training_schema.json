@@ -1,38 +1,57 @@
 {
   "properties": {
     "optimizer": {
-      "pattern": "^(Adam|SGD)$",
+      "enum": [
+        "adam",
+        "sgd"
+      ],
       "title": "Optimizer",
       "type": "string"
     },
     "batch_size": {
-      "exclusiveMinimum": 0,
+      "enum": [
+        16,
+        32
+      ],
       "title": "Batch Size",
       "type": "integer"
     },
     "max_epochs": {
-      "exclusiveMinimum": 0,
+      "enum": [
+        15,
+        30
+      ],
       "title": "Max Epochs",
       "type": "integer"
     },
     "learning_rate": {
-      "exclusiveMinimum": 0.0,
+      "maximum": 0.01,
+      "minimum": 0.0001,
       "title": "Learning Rate",
       "type": "number"
     },
     "image_size": {
-      "minimum": 32,
+      "enum": [
+        128,
+        160
+      ],
       "title": "Image Size",
       "type": "integer"
     },
     "hidden_layers": {
-      "minimum": 0,
+      "enum": [
+        0,
+        1
+      ],
       "title": "Hidden Layers",
       "type": "integer"
     },
     "dropout": {
-      "maximum": 1.0,
-      "minimum": 0.0,
+      "enum": [
+        0.0,
+        0.3,
+        0.5
+      ],
       "title": "Dropout",
       "type": "number"
     },
@@ -44,12 +63,12 @@
       "title": "Seed Train",
       "type": "integer"
     },
-    "seed_model": {
-      "title": "Seed Model",
+    "seed_aug": {
+      "title": "Seed Aug",
       "type": "integer"
     },
-    "seed_eval": {
-      "title": "Seed Eval",
+    "seed_model": {
+      "title": "Seed Model",
       "type": "integer"
     },
     "patience": {
@@ -73,8 +92,8 @@
     "dropout",
     "seed_split",
     "seed_train",
+    "seed_aug",
     "seed_model",
-    "seed_eval",
     "patience",
     "min_delta"
   ],
