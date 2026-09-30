@@ -27,7 +27,11 @@ services:
       retries: 20
 
   minio:
-    image: quay.io/minio/minio
+    # Fuera del alcance de P3-03, pero encontrado al probarlo: `quay.io/minio/minio`
+    # (la imagen que ya estaba aquí) empezó a devolver "401 UNAUTHORIZED" al
+    # jalarla anónimamente -- probado repetido, no es un problema transitorio de
+    # esta corrida. `minio/minio` (Docker Hub) sigue siendo pública.
+    image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Define MINIO_ROOT_USER en .env}
@@ -118,6 +122,119 @@ services:
       # Solo lectura: el Copilot consulta el dataset y los reportes, nunca escribe.
       - ./data/raw:/app/data/raw:ro
       - ./reports:/app/reports:ro
+    restart: on-failure:5
+
+  # P3-03: crea la base "mlflow" en MariaDB (backend store) antes de que
+  # arranque el servicio `mlflow`. Un script de init de MariaDB no sirve
+  # aquí: solo corre la primera vez que el volumen `mariadb_data` se crea, y
+  # ese volumen ya existe desde P1/P2 en cualquier clon que venga de antes.
+  mariadb-mlflow-db:
+    image: mariadb:11
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Define MARIADB_ROOT_PASSWORD en .env}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        mariadb -h mariadb -uroot -p"$$MARIADB_ROOT_PASSWORD"
+        -e "CREATE DATABASE IF NOT EXISTS mlflow;"
+    restart: "no"
+
+  # Crea el bucket de artefactos de MLflow en MinIO si no existe.
+  # `mlflow_ops.ensure_bucket` (SDK `minio`, ya dependencia de `app/`) en vez
+  # de `mc mb`: tanto `minio/mc` (Docker Hub, "pull access denied") como
+  # `quay.io/minio/mc` (Quay, "401 unauthorized") dejaron de poderse jalar
+  # sin autenticarse -- ambos probados al armar este ticket. Reusa la imagen
+  # de `app` (mismo Dockerfile que `app`/`copilot`), no pide una nueva.
+  minio-mlflow-bucket:
+    build: ./app
+    command: ["python", "-m", "mlflow_ops.ensure_bucket"]
+    depends_on:
+      minio:
+        condition: service_started
+    environment: *pipeline-env
+    restart: "no"
+
+  # P3-03: registros en MariaDB (bd "mlflow"), artefactos en el bucket MinIO
+  # "mlflow-artifacts" -- ambos con volumen persistente (mariadb_data/
+  # minio_data, ya declarados abajo). Puerto 5050 en el host: 5000 choca con
+  # AirPlay en macOS (ver docs/decisiones-proyecto3.md).
+  mlflow:
+    build: ./docker/mlflow
+    depends_on:
+      mariadb-mlflow-db:
+        condition: service_completed_successfully
+      minio-mlflow-bucket:
+        condition: service_completed_successfully
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Define MARIADB_ROOT_PASSWORD en .env}
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?Define MINIO_ROOT_USER en .env}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?Define MINIO_ROOT_PASSWORD en .env}
+    # `--allowed-hosts`: sin esto, MLflow 3.x rechaza con 403 "Invalid Host
+    # header" cualquier request cuyo Host no esté en la lista -- su protección
+    # anti DNS-rebinding solo permite localhost por default, y el check exige
+    # el host CON el puerto exacto que trae la request (probado real,
+    # confirmado en el log del propio middleware): "mlflow:5000" para
+    # requests entre contenedores (puerto interno 5000) y "localhost:5050"
+    # para requests desde el host (puerto publicado 5050) -- "mlflow" o
+    # "localhost" sin puerto no bastan.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        mlflow server --host 0.0.0.0 --port 5000
+        --backend-store-uri "mysql+pymysql://root:$$MARIADB_ROOT_PASSWORD@mariadb:3306/mlflow"
+        --artifacts-destination s3://mlflow-artifacts
+        --serve-artifacts
+        --allowed-hosts mlflow,mlflow:5000,localhost,localhost:5050
+    ports:
+      - "5050:5000"
+    restart: on-failure:5
+
+  # P3-03: placeholder de infraestructura -- el bucle real de entrenamiento
+  # es P3-09. Comparte imagen con `ml-api` (Dockerfile.ml, grupo `ml`), cada
+  # uno con su propio comando, mismo patrón que `app`/`copilot` con Dockerfile.
+  trainer-worker:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.ml
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    environment:
+      <<: *pipeline-env
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      AWS_PROFILE: ${AWS_PROFILE:?Define AWS_PROFILE en .env (el perfil SSO del equipo, ej. mlops-p3)}
+    volumes:
+      - ./data/raw:/app/data/raw:ro
+      - ./reports:/app/reports:ro
+      # Solo lectura: el rol MLOpsP3 del equipo, nunca credenciales estáticas
+      # horneadas en la imagen (M2/P3-00b).
+      - ~/.aws:/home/appuser/.aws:ro
+    restart: on-failure:5
+
+  # P3-03: /health y /training/jobs (real); Experiments/Evaluation/Models/
+  # Inference responden "pending" hasta P3-12..P3-16. Sin publicar puerto:
+  # solo nginx (servicio `frontend`) lo alcanza, en /ml-api/.
+  ml-api:
+    build:
+      context: ./app
+      dockerfile: Dockerfile.ml
+    command: ["python", "-m", "ml_api.server"]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    environment:
+      <<: *pipeline-env
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     restart: on-failure:5
 
 volumes:

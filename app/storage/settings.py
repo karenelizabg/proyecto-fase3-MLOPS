@@ -87,6 +87,10 @@ class Settings(BaseSettings):
 
     quality: QualityPolicy
 
+    # P3-03: MLflow (trainer-worker, ml-api). Con default porque el resto del
+    # pipeline (gate, analyzers, copilot) no necesita MLflow para arrancar.
+    mlflow_tracking_uri: str = "http://mlflow:5000"
+
     @field_validator("anthropic_api_key", mode="before")
     @classmethod
     def blank_api_key_means_not_configured(cls, value: Any) -> Any:

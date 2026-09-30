@@ -26,10 +26,20 @@ dev = [
     "ruff>=0.7,<1",
     "pytest>=8.3,<9",
 ]
+# Fijadas con "==" a propósito (P3-03): la campaña de entrenamiento necesita
+# que todo el equipo reproduzca la misma versión exacta de torch/torchvision,
+# no un rango que uv pueda resolver distinto en cada máquina.
+ml = [
+    "torch==2.14.0",
+    "torchvision==0.29.0",
+    "mlflow==3.16.1",
+    "scikit-learn==1.9.1",
+    "pillow==10.4.0",
+]
 
 [tool.ruff]
 line-length = 100
-src = ["ingestion", "analyzers", "policies", "splits", "storage", "presentation", "copilot", "crops", "tests"]
+src = ["ingestion", "analyzers", "policies", "splits", "storage", "presentation", "copilot", "crops", "ml_api", "ml_worker", "mlflow_ops", "tests"]
 
 [tool.ruff.lint]
 # E/F: errores y pyflakes. I: orden de imports. B: bugbear (bugs probables).
@@ -38,7 +48,7 @@ src = ["ingestion", "analyzers", "policies", "splits", "storage", "presentation"
 select = ["E", "F", "I", "B", "SIM", "C4", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["ingestion", "analyzers", "policies", "splits", "storage", "presentation", "copilot", "crops"]
+known-first-party = ["ingestion", "analyzers", "policies", "splits", "storage", "presentation", "copilot", "crops", "ml_api", "ml_worker", "mlflow_ops"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
