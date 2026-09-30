@@ -279,39 +279,146 @@ stages:
       nfiles: 600
     - path: analyzers
       hash: md5
-      md5: 574389b3e81d80db69fa747c2fc75a8a.dir
-      size: 64410
-      nfiles: 17
+      md5: e40324666fcdc4965dd640bf550e7ada.dir
+      size: 36189
+      nfiles: 9
     - path: crops
       hash: md5
-      md5: b6108e9b4d1182a86709786978dad2c4.dir
-      size: 36322
-      nfiles: 7
+      md5: d4ee7494f16e1f72d32183a5e34682bb.dir
+      size: 16614
+      nfiles: 4
     - path: dvc_crops_stage.py
       hash: md5
       md5: dbede3ff202ee4c0857384b75aa54d07
       size: 995
     - path: ingestion
       hash: md5
-      md5: 8c500329f0b91fb8b875c4fe7bcdf74b.dir
-      size: 18035
-      nfiles: 7
+      md5: ca089950caaa39a071f3accdd1cd4c12.dir
+      size: 8462
+      nfiles: 4
     - path: policies
       hash: md5
-      md5: bd4b688b3364751b525ac8506c0d028c.dir
-      size: 9117
-      nfiles: 11
+      md5: 46c2dbb80ff6ca6f51e733c3fbb31abe.dir
+      size: 5233
+      nfiles: 8
     - path: pyproject.toml
       hash: md5
-      md5: 506b3fe172c91715a5e6f4b38ee9d3ac
-      size: 1300
+      md5: 067a501e815f28b7da5ce52604bd61f7
+      size: 1369
     - path: uv.lock
       hash: md5
-      md5: 27f68d5ad4e453843b6646f06058a9c8
-      size: 114274
+      md5: b1f56ebb3e2347f1e0d20fb88bf6321c
+      size: 148109
     outs:
     - path: ../data/derived/crops
       hash: md5
       md5: 4531108b6a9c14abc12f7e2d718be403.dir
       size: 22211810
       nfiles: 670
+  manifest:
+    cmd: uv run python dvc_manifest_stage.py
+    deps:
+    - path: ../data/derived/crops
+      hash: md5
+      md5: 4531108b6a9c14abc12f7e2d718be403.dir
+      size: 22211810
+      nfiles: 670
+    - path: ../data/raw/annotations
+      hash: md5
+      md5: c7cb86ae7ece94ef7b853620e464a4d7.dir
+      size: 256669
+      nfiles: 10
+    - path: ../data/raw/images
+      hash: md5
+      md5: 951150dd4fb053f4665089fcb37a1c87.dir
+      size: 13556278
+      nfiles: 600
+    - path: ../reports/releases/v0.1.1/quality.json
+      hash: md5
+      md5: 124d28ed7ed8fa0bd69b441015c67b61
+      size: 25698
+    - path: analyzers/duplicates.py
+      hash: md5
+      md5: 76c5ab2f5575fbf8e1aea182e2594a55
+      size: 2349
+    - path: analyzers/invalid_boxes.py
+      hash: md5
+      md5: 07c61830f87e86447ad368fb670793ae
+      size: 3891
+    - path: dvc_manifest_stage.py
+      hash: md5
+      md5: a2aa46f008fa522ebd170bf3e8970dff
+      size: 5885
+    - path: ingestion/loader.py
+      hash: md5
+      md5: 28522dcb1a8340aa41d9302339099d67
+      size: 2789
+    - path: manifest/__init__.py
+      hash: md5
+      md5: cf3229e3728efa0b3133536779cab1cc
+      size: 81
+    - path: manifest/build.py
+      hash: md5
+      md5: 463490e76592ca690b0bbbf19fb810b2
+      size: 9560
+    - path: manifest/check_leakage.py
+      hash: md5
+      md5: 8b6d6da7c557bc4f8b5c606b7046a498
+      size: 2905
+    - path: manifest/config.py
+      hash: md5
+      md5: 853790d97fb9b4f74bdee69e34883f4c
+      size: 1830
+    - path: policies/duplicates.py
+      hash: md5
+      md5: 9739409d6aca6ddb950bda0cc16d60b1
+      size: 395
+    - path: policies/invalid_boxes.py
+      hash: md5
+      md5: 348d235171976030627906b8ebd48d7b
+      size: 399
+    - path: policies/models.py
+      hash: md5
+      md5: 74bf2de1b7d3ad7d5749c46a42fc1743
+      size: 1405
+    - path: policies/quality.yaml
+      hash: md5
+      md5: 6b7ed64be85828614dac8a1341a3b91f
+      size: 1264
+    - path: splits/models.py
+      hash: md5
+      md5: c9057c6b2ee415daed5ad8a0b4016ea0
+      size: 1290
+    - path: splits/stratified.py
+      hash: md5
+      md5: f00bfed6ee2d3180f2d11e8d6ea3190a
+      size: 12497
+    - path: uv.lock
+      hash: md5
+      md5: b1f56ebb3e2347f1e0d20fb88bf6321c
+      size: 148109
+    params:
+      manifest/manifest.yaml:
+        classes:
+        - cat
+        - dog
+        max_deviation_pp: 5.0
+        release: v0.1.1
+        seed: 42
+        test: 0.1
+        train: 0.7
+        val: 0.2
+    outs:
+    - path: ../data/derived/manifests/v0.1.1
+      hash: md5
+      md5: d46f17ea0ad707b18cbd3e196cc370cd.dir
+      size: 53411
+      nfiles: 1
+    - path: ../reports/manifests/v0.1.1/counts.json
+      hash: md5
+      md5: 9aab2710863dc965010042d8b6f8b771
+      size: 1940
+    - path: ../reports/manifests/v0.1.1/manifest_meta.json
+      hash: md5
+      md5: e9763633197e29e678a97400a56f469d
+      size: 954

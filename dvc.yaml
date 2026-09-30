@@ -1,3 +1,6 @@
+vars:
+  - app/manifest/manifest.yaml:release
+
 stages:
   quality_report:
     wdir: app
@@ -105,3 +108,42 @@ stages:
       - uv.lock
     outs:
       - ../data/derived/crops
+
+  manifest:
+    wdir: app
+    cmd: uv run python dvc_manifest_stage.py
+    deps:
+      - ../data/raw/annotations
+      - ../data/raw/images
+      - ../data/derived/crops
+      - ../reports/releases/${release}/quality.json
+      - dvc_manifest_stage.py
+      - manifest/__init__.py
+      - manifest/build.py
+      - manifest/check_leakage.py
+      - manifest/config.py
+      - splits/models.py
+      - splits/stratified.py
+      - analyzers/duplicates.py
+      - analyzers/invalid_boxes.py
+      - ingestion/loader.py
+      - policies/invalid_boxes.py
+      - policies/duplicates.py
+      - policies/models.py
+      - policies/quality.yaml
+      - uv.lock
+    params:
+      - manifest/manifest.yaml:
+          - release
+          - train
+          - val
+          - test
+          - seed
+          - classes
+          - max_deviation_pp
+    outs:
+      - ../data/derived/manifests/${release}
+      - ../reports/manifests/${release}/manifest_meta.json:
+          cache: false
+      - ../reports/manifests/${release}/counts.json:
+          cache: false
