@@ -1,4 +1,3 @@
-import torch
 from torchvision import transforms
 
 
@@ -6,8 +5,6 @@ def get_preprocessing_transforms(
     split: str, image_size: int, seed_aug: int | None = None
 ) -> transforms.Compose:
     if split == "train":
-        if seed_aug is not None:
-            torch.manual_seed(seed_aug)
         return transforms.Compose(
             [
                 transforms.RandomResizedCrop(image_size),

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, RandomSampler
 from training.preprocess import get_preprocessing_transforms
 
 
@@ -52,14 +52,27 @@ def create_dataloader(
     seed_aug: int | None = None,
 ):
     dataset = ManifestDataset(manifest_path, base_dir, split, image_size, seed_aug)
-    generator = torch.Generator()
-    generator.manual_seed(seed_train)
 
-    return DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=(split == "train"),
-        generator=generator,
-        num_workers=2,
-        worker_init_fn=seed_worker,
-    )
+    g_aug = torch.Generator()
+    if seed_aug is not None:
+        g_aug.manual_seed(seed_aug)
+    else:
+        g_aug.manual_seed(0)
+
+    if split == "train":
+        g_train = torch.Generator()
+        g_train.manual_seed(seed_train)
+
+        sampler = RandomSampler(dataset, generator=g_train)
+        return DataLoader(
+            dataset,
+            batch_size=batch_size,
+            sampler=sampler,
+            generator=g_aug,
+            num_workers=2,
+            worker_init_fn=seed_worker,
+        )
+    else:
+        return DataLoader(
+            dataset, batch_size=batch_size, shuffle=False, num_workers=2, worker_init_fn=seed_worker
+        )
