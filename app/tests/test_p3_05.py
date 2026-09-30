@@ -59,10 +59,11 @@ def test_model_output_shape_and_frozen_layers():
 
 
 def test_preprocessing_deterministic():
-    transform = get_preprocessing_transforms(224)
+    transform = get_preprocessing_transforms(image_size=128)
     img_array = np.random.randint(0, 255, (300, 300, 3), dtype=np.uint8)
     img = Image.fromarray(img_array)
 
     tensor1 = transform(img)
     tensor2 = transform(img)
+
     assert torch.equal(tensor1, tensor2)
