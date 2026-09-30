@@ -1,10 +1,11 @@
 """Tier 1 — combina los lotes reales de anotaciones en un solo CocoDataset.
 
 Cada `annotations-lote-*.json` en `data/raw/annotations/` es autocontenido
-(ver app/ingestion/README.md); este módulo es el único punto donde se
-juntan antes de validarse como un solo documento. Si dos lotes reintroducen
-el bug de [[project_dataset_id_collision_bug]] (ids repetidos entre
-archivos), `CocoDataset.model_validate` lo rechaza aquí, no río abajo.
+(ver app/ingestion/README.md). `load_raw_dataset` es el único punto donde se
+juntan, sin validarlos; `load_dataset` es la puerta estricta del pipeline. Si dos
+lotes reintroducen el bug de [[project_dataset_id_collision_bug]] (ids repetidos
+entre archivos), `CocoDataset.model_validate` lo rechaza en `load_dataset`, no
+río abajo.
 """
 
 import json
@@ -13,14 +14,13 @@ from pathlib import Path
 from ingestion.models import CocoDataset
 
 
-def load_dataset(annotations_dir: Path) -> CocoDataset:
-    """Lee y valida todos los `*.json` de `annotations_dir` como un solo dataset.
+def load_raw_dataset(annotations_dir: Path) -> dict:
+    """Combina los lotes en un dict COCO crudo, sin validar el formato.
 
-    Las categorías se deduplican por id, quedándose con la primera aparición.
-    Si dos lotes usan el mismo id de categoría para
-    nombres distintos, es una colisión real (no una simple repetición del
-    seeder) y se rechaza aquí en vez de mezclar silenciosamente anotaciones
-    de una clase con el nombre de otra.
+    Deduplica categorías por id y rechaza el mismo id con nombres distintos
+    (colisión real). Devuelve el dict tal cual llega (`images`, `annotations` y
+    `categories`), para que quien necesite inspeccionar cajas inválidas antes de
+    la validación estricta pueda hacerlo. No repara ni descarta nada.
     """
     files = sorted(annotations_dir.glob("*.json"))
     if not files:
@@ -45,13 +45,16 @@ def load_dataset(annotations_dir: Path) -> CocoDataset:
             categories_by_id.setdefault(category["id"], category)
             categories_source.setdefault(category["id"], path)
 
-    return CocoDataset.model_validate(
-        {
-            "images": images,
-            "annotations": annotations,
-            "categories": list(categories_by_id.values()),
-        }
-    )
+    return {
+        "images": images,
+        "annotations": annotations,
+        "categories": list(categories_by_id.values()),
+    }
+
+
+def load_dataset(annotations_dir: Path) -> CocoDataset:
+    """Valida el merge crudo de todos los lotes como un solo `CocoDataset`."""
+    return CocoDataset.model_validate(load_raw_dataset(annotations_dir))
 
 
 def load_image_bytes(coco: CocoDataset, images_dir: Path) -> dict[int, bytes]:

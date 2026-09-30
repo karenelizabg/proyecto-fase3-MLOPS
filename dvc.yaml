@@ -89,3 +89,19 @@ stages:
     outs:
       - ../reports/projections.json:
           cache: false
+
+  crops:
+    wdir: app
+    cmd: uv run python dvc_crops_stage.py
+    deps:
+      - ../data/raw/annotations
+      - ../data/raw/images
+      - dvc_crops_stage.py
+      - crops
+      - analyzers
+      - policies
+      - ingestion
+      - pyproject.toml
+      - uv.lock
+    outs:
+      - ../data/derived/crops
