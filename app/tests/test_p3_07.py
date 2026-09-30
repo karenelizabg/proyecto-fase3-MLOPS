@@ -1,56 +1,150 @@
-import math
-
+import numpy as np
+import pandas as pd
+import pytest
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from PIL import Image
+from training.config import TrainingConfig
+from training.data import ManifestDataset, create_dataloader
+from training.model import build_model
+from training.trainer import set_reproducibility, train_epoch
 
 
-def get_dummy_dataloader(num_samples=10, batch_size=3, seed=42):
-    X = torch.randn(num_samples, 3, 224, 224)
-    y = torch.randint(0, 2, (num_samples,))
-    ids = torch.arange(num_samples)
-    dataset = TensorDataset(X, y, ids)
+@pytest.fixture
+def mock_dataset_env(tmp_path):
+    base_dir = tmp_path / "data/derived/crops"
+    base_dir.mkdir(parents=True)
 
-    generator = torch.Generator()
-    generator.manual_seed(seed)
+    records = []
+    for i in range(4):
+        img_name = f"dummy_{i}.jpg"
+        img_array = np.random.randint(0, 255, (10, 10, 3), dtype=np.uint8)
+        Image.fromarray(img_array).save(base_dir / img_name)
+        records.append(
+            {
+                "path": img_name,
+                "split": "train" if i < 2 else "val",
+                "label": 0 if i % 2 == 0 else 1,
+                "crop_id": i,
+            }
+        )
 
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, generator=generator)
+    manifest_path = tmp_path / "manifest.csv"
+    pd.DataFrame(records).to_csv(manifest_path, index=False)
 
-
-def test_same_crop_id_order_with_same_seed():
-    loader1 = get_dummy_dataloader(seed=42)
-    loader2 = get_dummy_dataloader(seed=42)
-
-    _, _, ids1 = next(iter(loader1))
-    _, _, ids2 = next(iter(loader2))
-
-    assert torch.equal(ids1, ids2)
-
-
-def test_ceil_steps_per_epoch():
-    num_samples = 10
-    batch_size = 3
-    loader = get_dummy_dataloader(num_samples=num_samples, batch_size=batch_size)
-
-    expected_steps = math.ceil(num_samples / batch_size)
-    actual_steps = len(loader)
-
-    assert actual_steps == expected_steps
+    return str(manifest_path), str(base_dir)
 
 
-def test_weights_change_after_short_run():
-    model = nn.Linear(10, 2)
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+def test_val_test_identical_tensors(mock_dataset_env):
+    manifest_path, base_dir = mock_dataset_env
+    loader_val = create_dataloader(
+        manifest_path, base_dir, "val", batch_size=1, image_size=128, seed_train=43
+    )
+    tensor1, _, _ = next(iter(loader_val))
+    tensor2, _, _ = next(iter(loader_val))
+    assert torch.equal(tensor1, tensor2)
+
+
+def test_augmentation_only_in_train(mock_dataset_env):
+    manifest_path, base_dir = mock_dataset_env
+
+    val_dataset = ManifestDataset(manifest_path, base_dir, "val", image_size=128)
+    tensor_val1, _, _ = val_dataset[0]
+    tensor_val2, _, _ = val_dataset[0]
+    assert torch.equal(tensor_val1, tensor_val2)
+
+    train_dataset = ManifestDataset(manifest_path, base_dir, "train", image_size=128)
+    tensor_train1, _, _ = train_dataset[0]
+    tensor_train2, _, _ = train_dataset[0]
+    assert not torch.equal(tensor_train1, tensor_train2)
+
+
+def test_train_reproducible_with_same_seed(mock_dataset_env):
+    manifest_path, base_dir = mock_dataset_env
+    device = torch.device("cpu")
+
+    config = TrainingConfig(
+        optimizer="Adam",
+        batch_size=2,
+        max_epochs=1,
+        learning_rate=0.001,
+        image_size=128,
+        hidden_layers=0,
+        dropout=0.0,
+        seed_split=42,
+        seed_train=43,
+        seed_eval=44,
+        seed_model=45,
+        patience=5,
+        min_delta=0.01,
+    )
+
+    def run_simulated_epoch():
+        set_reproducibility(
+            seed_model=config.seed_model, seed_train=config.seed_train, seed_split=config.seed_split
+        )
+        model = build_model(config).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+        criterion = nn.CrossEntropyLoss()
+
+        dataloader = create_dataloader(
+            manifest_path,
+            base_dir,
+            "train",
+            batch_size=config.batch_size,
+            image_size=config.image_size,
+            seed_train=config.seed_train,
+            seed_aug=config.seed_eval,
+        )
+
+        loss = train_epoch(model, dataloader, optimizer, criterion, device)
+        return loss, model.fc[1].weight.clone()
+
+    loss1, weights1 = run_simulated_epoch()
+    loss2, weights2 = run_simulated_epoch()
+
+    assert loss1 == loss2
+    assert torch.equal(weights1, weights2)
+
+
+def test_train_epoch_updates_weights(mock_dataset_env):
+    manifest_path, base_dir = mock_dataset_env
+    device = torch.device("cpu")
+
+    config = TrainingConfig(
+        optimizer="Adam",
+        batch_size=2,
+        max_epochs=1,
+        learning_rate=0.001,
+        image_size=128,
+        hidden_layers=0,
+        dropout=0.0,
+        seed_split=42,
+        seed_train=43,
+        seed_eval=44,
+        seed_model=45,
+        patience=5,
+        min_delta=0.01,
+    )
+
+    set_reproducibility(
+        seed_model=config.seed_model, seed_train=config.seed_train, seed_split=config.seed_split
+    )
+    model = build_model(config).to(device)
+    initial_weights = model.fc[1].weight.clone()
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     criterion = nn.CrossEntropyLoss()
+    dataloader = create_dataloader(
+        manifest_path,
+        base_dir,
+        "train",
+        batch_size=config.batch_size,
+        image_size=config.image_size,
+        seed_train=config.seed_train,
+        seed_aug=config.seed_eval,
+    )
 
-    initial_weights = model.weight.clone()
+    train_epoch(model, dataloader, optimizer, criterion, device)
 
-    x = torch.randn(4, 10)
-    y = torch.randint(0, 2, (4,))
-
-    optimizer.zero_grad()
-    loss = criterion(model(x), y)
-    loss.backward()
-    optimizer.step()
-
-    assert not torch.equal(initial_weights, model.weight)
+    assert not torch.equal(initial_weights, model.fc[1].weight)

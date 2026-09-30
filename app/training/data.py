@@ -1,53 +1,65 @@
+import os
+import random
+
+import numpy as np
 import pandas as pd
 import torch
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
+from training.preprocess import get_preprocessing_transforms
 
 
-def get_transforms(split: str, image_size: int = 224):
-    if split == "train":
-        return transforms.Compose(
-            [
-                transforms.RandomResizedCrop(image_size),
-                transforms.RandomHorizontalFlip(),
-                transforms.ColorJitter(brightness=0.2, contrast=0.2),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ]
-        )
-    else:
-        return transforms.Compose(
-            [
-                transforms.Resize((image_size, image_size)),
-                transforms.ToTensor(),
-                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ]
-        )
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 
 class ManifestDataset(Dataset):
-    def __init__(self, manifest_path: str, split: str, image_size: int = 224):
+    def __init__(
+        self,
+        manifest_path: str,
+        base_dir: str,
+        split: str,
+        image_size: int,
+        seed_aug: int | None = None,
+    ):
         df = pd.read_csv(manifest_path)
         self.data = df[df["split"] == split].reset_index(drop=True)
-        self.transform = get_transforms(split, image_size)
+        self.base_dir = base_dir
+        self.transform = get_preprocessing_transforms(split, image_size, seed_aug)
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
         row = self.data.iloc[idx]
-        image = Image.open(row["path"]).convert("RGB")
+        img_path = os.path.join(self.base_dir, row["path"])
+        image = Image.open(img_path).convert("RGB")
         tensor = self.transform(image)
-        label = 0 if row["category_id"] == 3 else 1
+
+        label = row["label"]
         return tensor, label, row["crop_id"]
 
 
-def create_dataloader(manifest_path: str, split: str, batch_size: int, seed: int):
-    dataset = ManifestDataset(manifest_path, split)
+def create_dataloader(
+    manifest_path: str,
+    base_dir: str,
+    split: str,
+    batch_size: int,
+    image_size: int,
+    seed_train: int,
+    seed_aug: int | None = None,
+):
+    dataset = ManifestDataset(manifest_path, base_dir, split, image_size, seed_aug)
     generator = torch.Generator()
-    generator.manual_seed(seed)
+    generator.manual_seed(seed_train)
 
     return DataLoader(
-        dataset, batch_size=batch_size, shuffle=(split == "train"), generator=generator
+        dataset,
+        batch_size=batch_size,
+        shuffle=(split == "train"),
+        generator=generator,
+        num_workers=2,
+        worker_init_fn=seed_worker,
     )
