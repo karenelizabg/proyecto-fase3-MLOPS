@@ -1,29 +1,28 @@
 import json
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class TrainingConfig(BaseModel):
-    model_config = ConfigDict(strict=True)
-
-    optimizer: str = Field(..., pattern="^(Adam|SGD)$")
-    batch_size: int = Field(..., gt=0)
-    max_epochs: int = Field(..., gt=0)
-    learning_rate: float = Field(..., gt=0.0)
-    image_size: int = Field(..., ge=32)
-    hidden_layers: int = Field(..., ge=0)
-    dropout: float = Field(..., ge=0.0, le=1.0)
+    model_config = ConfigDict(strict=True, extra="forbid")
+    optimizer: Literal["adam", "sgd"]
+    batch_size: Literal[16, 32]
+    max_epochs: Literal[15, 30]
+    learning_rate: float = Field(..., ge=1e-4, le=1e-2)
+    image_size: Literal[128, 160]
+    hidden_layers: Literal[0, 1]
+    dropout: Literal[0.0, 0.3, 0.5]
 
     seed_split: int
     seed_train: int
+    seed_aug: int
     seed_model: int
-    seed_eval: int
 
     patience: int = Field(..., ge=0)
     min_delta: float = Field(..., ge=0.0)
 
 
 def export_schema(filepath: str = "training_schema.json"):
-    schema = TrainingConfig.model_json_schema()
     with open(filepath, "w") as f:
-        json.dump(schema, f, indent=2)
+        json.dump(TrainingConfig.model_json_schema(), f, indent=2)
