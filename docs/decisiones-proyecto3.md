@@ -16,8 +16,67 @@
 | Remote DVC | `s3://mlops-p2-dvc-cache-222629887955` |
 | Baseline de P2 | commit `9cfea4c`, tag `p2-final-baseline` = [`karenelizabg/proyecto-fase2-MLOPS@849c812`](https://github.com/karenelizabg/proyecto-fase2-MLOPS/commit/849c8120bd1b8fbc5c2fa40bdf390d16d62ec57f) (entrega final de P2, calificada con 99) |
 
-La política de compuerta y los conteos útiles por clase los documenta P3-02
-(#5) en la sección "Política de compuerta" de este archivo.
+### Política de compuerta
+
+La compuerta evalúa los siete checks de `app/policies/quality.yaml`. Un check
+con `action: fail` que no pasa deja el reporte en `status: failed` y detiene las
+etapas de DVC que dependen del marcador de la compuerta (hoy, solo `split`); un
+check con `action: warn` que no pasa deja el release en `status: warning`, que
+**sí cuenta como aprobado** para este proyecto.
+
+- `app/policies/quality.yaml`: bloquean (`action: fail`) `min_images_per_class`
+  (umbral 300), `degenerate_boxes` (umbral 0) y `cross_split_leakage` (umbral 0);
+  solo advierten (`action: warn`) `max_imbalance_ratio`, `max_small_object_ratio`,
+  `duplicate_similarity_threshold` y `min_spatial_dispersion`.
+- `app/presentation/gate.py`, `evaluate_dataset` (líneas 144-149): `status` es
+  `failed` si algún check `fail` no pasó, `warning` si solo fallan checks
+  `warn`, y `passed` si todo pasa. `main()` (líneas 199-208) devuelve código 1
+  cuando el reporte es `failed`.
+- `app/dvc_gate_stage.py`: escribe el marcador `reports/.quality_gate.passed`
+  solo si el reporte no es `failed`. En `dvc.yaml`, ese marcador se declara como
+  salida de la etapa `quality_gate` (línea 36) y **solo** `split` lo lista como
+  dependencia (línea 45); `projections` no depende de la compuerta.
+
+**Release de origen verificado.** En `v0.1.1` ningún check `fail` reprobó
+(`min_images_per_class = 300.0`, `degenerate_boxes = 0`,
+`cross_split_leakage = 0`); el `status: warning` proviene de checks `warn`, por
+lo que la compuerta se considera **aprobada** y existe
+`reports/.quality_gate.passed`. En `v0.1.0` la compuerta quedó `failed`: su
+política aún declaraba las clases `person` (id 1) y `car` (id 2) sin
+anotaciones, así que `min_images_per_class` (action `fail`) vio 0 imágenes y
+reprobó el release.
+
+**Recuperabilidad de v0.1.0.** v0.1.0 comparte las mismas 600 imágenes de
+v0.1.1 (`data/raw/images.dvc` = `951150dd4fb053f4665089fcb37a1c87.dir`, con 600
+archivos) y se diferencia solo en las anotaciones
+(`8bd7d8e8f4dcb65edf95d8f38822cc53.dir`, 10 archivos). Ambos objetos siguen
+presentes en el cache de S3 (`files/md5/.../.dir`), por lo que los datos de
+v0.1.0 **sí son recuperables** desde el repo de P2; su reprobación se debe a la
+lista de clases, no a la pérdida del dataset.
+
+**Conteos útiles por clase (P3-02).** Contando imágenes originales después de
+descartar cajas inválidas con el mismo analizador de la compuerta
+(`app/crops/counts.py`, que reutiliza `analyzers.invalid_boxes`), sobre
+`data/raw` (600 imágenes, 668 anotaciones, 0 cajas inválidas en este release).
+El conteo parte del COCO crudo (`load_raw_dataset`), así que el filtro también
+opera cuando el dataset trae cajas degeneradas que la validación estricta
+rechazaría:
+
+| Clase | Imágenes originales | Mínimo | ¿Cumple? |
+|---|---|---|---|
+| `dog` (id 3) | 300 | 300 | Sí, en el mínimo exacto |
+| `cat` (id 4) | 301 | 300 | Sí |
+
+`dog` está justo en el mínimo de 300: una sola caja inválida adicional, si es la
+única de perro en su imagen, lo dejaría en 299 imágenes útiles (y la compuerta
+reprobaría por `degenerate_boxes`). Es la clase a vigilar en P3-04 al construir
+los recortes.
+
+Comando de verificación:
+
+```bash
+cd app && uv run python -m crops.counts --annotations-dir ../data/raw/annotations
+```
 
 ## 2. Clases
 
@@ -31,8 +90,8 @@ La política de compuerta y los conteos útiles por clase los documenta P3-02
 - **Unidad de clasificación:** un recorte por caja válida, nunca la imagen
   completa.
 - **Conteo en bruto** (antes de filtrar cajas inválidas): `dog` 300 imágenes
-  originales y `cat` 301. `dog` está exactamente en el mínimo de 300; P3-02
-  confirma el conteo después del filtro.
+  originales y `cat` 301. P3-02 confirma que, tras descartar las cajas
+  inválidas, siguen siendo 300 y 301; `dog` está exactamente en el mínimo.
 
 ## 3. CNN
 
