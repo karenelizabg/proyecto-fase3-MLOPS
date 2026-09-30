@@ -39,16 +39,19 @@ jobs:
           cache-dependency-glob: app/uv.lock
       - name: Instalar dependencias (falla si uv.lock está desactualizado)
         # --no-build: solo wheels ya publicadas, sin ejecutar scripts de compilación de
-        # terceros (mismo criterio que app/Dockerfile).
-        run: uv sync --locked --no-build
+        # terceros (mismo criterio que app/Dockerfile). --group ml: app/copilot no lo
+        # usan en producción (Dockerfile base los construye sin este flag), pero las
+        # pruebas de entrenamiento (P3-05/P3-07, P3-03) sí necesitan torch instalado
+        # aquí para correr.
+        run: uv sync --locked --no-build --group ml
       - name: Ruff (lint)
-        run: uv run --locked --no-build ruff check .
+        run: uv run --locked --no-build --group ml ruff check .
       - name: Ruff (formato)
-        run: uv run --locked --no-build ruff format --check .
+        run: uv run --locked --no-build --group ml ruff format --check .
       - name: Tests
-        run: uv run --locked --no-build pytest -q
+        run: uv run --locked --no-build --group ml pytest -q
       - name: Mutation test (quality gate)
-        run: uv run --locked --no-build python ../.github/scripts/run_gate_mutation.py
+        run: uv run --locked --no-build --group ml python ../.github/scripts/run_gate_mutation.py
 
   backend:
     name: Backend (Biome, tsc, tests y build)

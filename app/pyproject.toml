@@ -28,13 +28,17 @@ dev = [
 ]
 # Fijadas con "==" a propósito (P3-03): la campaña de entrenamiento necesita
 # que todo el equipo reproduzca la misma versión exacta de torch/torchvision,
-# no un rango que uv pueda resolver distinto en cada máquina.
+# no un rango que uv pueda resolver distinto en cada máquina. torch/torchvision
+# (P3-05) y pandas (P3-07) habían llegado a `dependencies`; se mueven aquí
+# porque solo los usa app/training/, así app/copilot no los cargan (el CI
+# sigue instalándolos vía `--group ml` para poder correr esas pruebas).
 ml = [
     "torch==2.14.0",
     "torchvision==0.29.0",
     "mlflow==3.16.1",
     "scikit-learn==1.9.1",
     "pillow==10.4.0",
+    "pandas>=3.0.6",
 ]
 
 [tool.ruff]
