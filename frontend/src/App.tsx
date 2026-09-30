@@ -2,6 +2,11 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { AnnotateScreen } from "@/components/annotate/AnnotateScreen";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { UploadScreen } from "@/components/upload/UploadScreen";
+import { EvaluationPage } from "@/model/pages/Evaluation";
+import { ExperimentsPage } from "@/model/pages/Experiments";
+import { InferencePage } from "@/model/pages/Inference";
+import { ModelsPage } from "@/model/pages/Models";
+import { TrainingPage } from "@/model/pages/Training";
 import { DashboardPage } from "@/pages/Dashboard";
 import { SearchPage } from "@/pages/SearchPage";
 import { AnalyzersPage } from "@/pipeline/pages/Analyzers";
@@ -101,6 +106,51 @@ export function App(): JSX.Element {
           </AppLayout>
         }
       />
+      {/* P3-03: clasificador perro/gato. Mismo AppLayout/GlobalNav que el
+          resto (ver GlobalNav.tsx) -- no un shell aparte. Solo /model/training
+          va bajo /model/ (así lo pide el issue #6); las otras 4 son rutas de
+          primer nivel. */}
+      <Route
+        path="/model/training"
+        element={
+          <AppLayout>
+            <TrainingPage />
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/experiments"
+        element={
+          <AppLayout>
+            <ExperimentsPage />
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/evaluation"
+        element={
+          <AppLayout>
+            <EvaluationPage />
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/models"
+        element={
+          <AppLayout>
+            <ModelsPage />
+          </AppLayout>
+        }
+      />
+      <Route
+        path="/inference"
+        element={
+          <AppLayout>
+            <InferencePage />
+          </AppLayout>
+        }
+      />
+
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   );

@@ -5,8 +5,10 @@ import {
   double,
   index,
   int,
+  json,
   mysqlEnum,
   mysqlTable,
+  text,
   timestamp,
   uniqueIndex,
   varchar,
@@ -208,6 +210,78 @@ export const annotationsRelations = relations(annotations, ({ one }) => ({
     references: [categories.id],
   }),
 }));
+
+/**
+ * training_jobs (P3-03)
+ *
+ * Estado de una corrida de entrenamiento de la campaña de experimentos.
+ * `trainer-worker` (Python) es quien escribe: crea la fila al arrancar una
+ * corrida y va actualizando `status`/`progress`/`logs`/`heartbeatAt`
+ * mientras entrena; `ml-api` (Python) solo lee, para la página Training.
+ * `id` es un identificador propio de la app (ej. "r01"), NO el run id que
+ * asigna MLflow -- ese vive aparte en `mlflowRunId`, porque una corrida
+ * podría reintentarse con un `mlflowRunId` nuevo sin cambiar de fila.
+ */
+export const trainingJobs = mysqlTable(
+  'training_jobs',
+  {
+    // Identificador de la corrida (ej. "r01"), no autoincremental: lo asigna
+    // quien encola el job, antes de que exista la fila.
+    id: varchar('id', {
+      length: 64,
+    }).primaryKey(),
+
+    status: mysqlEnum('status', ['queued', 'running', 'completed', 'failed', 'cancelled'])
+      .notNull()
+      .default('queued'),
+
+    // Fracción completada de epocas_maximas, 0-1.
+    progress: double('progress').notNull().default(0),
+
+    // Hiperparámetros de la corrida (optimizador, batch, lr, ...). La forma
+    // exacta la define P3-07 (entrenador); aquí solo se guarda tal cual.
+    config: json('config').notNull(),
+
+    // Versión del release de datos usada (ej. "v0.1.1"). Nombrada
+    // "dataset_release", no "release": es palabra reservada en SQL y rompe
+    // cualquier consulta cruda sin comillas (probado con MariaDB real).
+    datasetRelease: varchar('dataset_release', {
+      length: 100,
+    }).notNull(),
+
+    // Manifiesto congelado (P3-06) sobre el que corrió esta corrida.
+    manifestId: varchar('manifest_id', {
+      length: 100,
+    }).notNull(),
+
+    // Null hasta que MLflow crea el run real.
+    mlflowRunId: varchar('mlflow_run_id', {
+      length: 100,
+    }),
+
+    // Mensaje de error si status = 'failed'; null en cualquier otro caso.
+    error: text('error'),
+
+    // Líneas de log recientes, más nuevas al final. No es el log completo
+    // (eso vive en MLflow/artefactos): solo lo suficiente para la UI.
+    logs: json('logs').notNull(),
+
+    // Último "sigo vivo" de trainer-worker. Null antes de arrancar; una
+    // corrida sin heartbeat reciente y status='running' se considera colgada.
+    heartbeatAt: timestamp('heartbeat_at'),
+
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
+  },
+
+  (table) => [
+    index('training_jobs_status_idx').on(table.status),
+    index('training_jobs_heartbeat_at_idx').on(table.heartbeatAt),
+  ],
+);
+
+export type TrainingJobRow = typeof trainingJobs.$inferSelect;
+export type NewTrainingJobRow = typeof trainingJobs.$inferInsert;
 
 /**
  * Tipos TypeScript generados automáticamente desde el esquema.

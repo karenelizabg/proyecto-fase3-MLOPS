@@ -87,6 +87,15 @@ class Settings(BaseSettings):
 
     quality: QualityPolicy
 
+    # P3-03: MLflow (trainer-worker, ml-api). Con default porque el resto del
+    # pipeline (gate, analyzers, copilot) no necesita MLflow para arrancar.
+    mlflow_tracking_uri: str = "http://mlflow:5000"
+
+    # P3-03: ml-api. Mismo patrón que copilot_host: loopback por defecto,
+    # docker-compose lo abre con ML_API_HOST para que nginx lo alcance.
+    ml_api_host: str = "127.0.0.1"
+    ml_api_port: int = 8100
+
     @field_validator("anthropic_api_key", mode="before")
     @classmethod
     def blank_api_key_means_not_configured(cls, value: Any) -> Any:
