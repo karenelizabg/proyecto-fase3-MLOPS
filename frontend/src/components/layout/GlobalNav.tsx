@@ -1,12 +1,17 @@
 import {
   Bot,
   ChartScatter,
+  Cpu,
+  FlaskConical,
   Gauge,
   History,
   LayoutDashboard,
+  LineChart,
+  Package,
   ScanSearch,
   Search,
   Settings as SettingsIcon,
+  Sparkles,
   SplitSquareHorizontal,
   Upload,
 } from "lucide-react";
@@ -33,6 +38,17 @@ const PIPELINE_NAV_ITEMS: NavItem[] = [
   { label: "PCA / t-SNE", to: "/pipeline/projections", icon: ChartScatter },
   { label: "Copilot", to: "/pipeline/copilot", icon: Bot },
   { label: "Settings", to: "/pipeline/settings", icon: SettingsIcon },
+];
+
+// P3-03: clasificador perro/gato (entrenamiento, experimentos, evaluación,
+// modelos publicados, inferencia). Mismo nav global que anotación/pipeline —
+// ver el docstring de GlobalNav sobre por qué no tiene su propio shell.
+const MODEL_NAV_ITEMS: NavItem[] = [
+  { label: "Training", to: "/model/training", icon: FlaskConical },
+  { label: "Experiments", to: "/experiments", icon: LineChart },
+  { label: "Evaluation", to: "/evaluation", icon: Sparkles },
+  { label: "Models", to: "/models", icon: Package },
+  { label: "Inference", to: "/inference", icon: Cpu },
 ];
 
 function NavLinkList({ items }: { items: NavItem[] }) {
@@ -63,10 +79,11 @@ function NavLinkList({ items }: { items: NavItem[] }) {
 
 /**
  * Navegación global de la app: única fuente de verdad para el sidebar/header
- * de las 9 pantallas del portal (anotación + pipeline de calidad de
- * datasets). Un solo portal, un solo menú — las 6 pantallas del pipeline no
- * abren ni existen como una app/nav separada (antes vivían en su propio
- * `PipelineNav`; ver historial de `PipelineLayout.tsx`, eliminado).
+ * de las 14 pantallas del portal (anotación + pipeline de calidad de
+ * datasets + P3-03: modelo perro/gato). Un solo portal, un solo menú — ni
+ * el pipeline ni "Modelo" abren o existen como una app/nav separada (antes
+ * el pipeline vivía en su propio `PipelineNav`; ver historial de
+ * `PipelineLayout.tsx`, eliminado).
  * Annotate (pantalla de anotación) NO usa este nav a propósito — es un modo
  * de enfoque de pantalla completa, con su propio botón "Volver" hacia la
  * pantalla de origen (mismo patrón que Figma/Canva al editar).
@@ -87,6 +104,8 @@ export function GlobalNav({ children }: { children?: ReactNode }) {
         <NavLinkList items={ANNOTATION_NAV_ITEMS} />
         <div className="my-2 h-px w-full shrink-0 bg-border lg:my-2" aria-hidden />
         <NavLinkList items={PIPELINE_NAV_ITEMS} />
+        <div className="my-2 h-px w-full shrink-0 bg-border lg:my-2" aria-hidden />
+        <NavLinkList items={MODEL_NAV_ITEMS} />
       </nav>
 
       {children && <div className="border-t border-border px-5 py-5">{children}</div>}
