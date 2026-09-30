@@ -57,6 +57,9 @@ def create_dataloader(
     g_aug = torch.Generator()
     if seed_aug is not None:
         g_aug.manual_seed(seed_aug)
+
+        if num_workers == 0:
+            torch.manual_seed(seed_aug)
     else:
         g_aug.manual_seed(0)
 

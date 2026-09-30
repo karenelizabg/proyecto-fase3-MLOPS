@@ -1,39 +1,11 @@
 import math
 
-import numpy as np
-import pandas as pd
-import pytest
 import torch
 import torch.nn as nn
-from PIL import Image
-
 from training.config import TrainingConfig
 from training.data import ManifestDataset, create_dataloader
 from training.model import build_model
 from training.trainer import set_reproducibility, train_epoch
-
-
-@pytest.fixture
-def mock_dataset_env(tmp_path):
-    base_dir = tmp_path / "data/derived/crops"
-    base_dir.mkdir(parents=True)
-
-    records = []
-    for i in range(4):
-        img_name = f"dummy_{i}.jpg"
-        img_array = np.random.randint(0, 255, (10, 10, 3), dtype=np.uint8)
-        Image.fromarray(img_array).save(base_dir / img_name)
-
-        if i < 3:
-            records.append({"path": img_name, "split": "train", "label": 0, "crop_id": i})
-        else:
-            records.append({"path": img_name, "split": "val", "label": 1, "crop_id": i})
-            records.append({"path": img_name, "split": "test", "label": 1, "crop_id": i + 1})
-
-    manifest_path = tmp_path / "manifest.csv"
-    pd.DataFrame(records).to_csv(manifest_path, index=False)
-
-    return str(manifest_path), str(base_dir)
 
 
 def test_val_test_identical_tensors(mock_dataset_env):
