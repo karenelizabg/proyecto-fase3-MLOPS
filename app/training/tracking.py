@@ -43,8 +43,11 @@ def evaluate_epoch(model, dataloader, criterion, device):
 
 def get_git_info():
     commit = os.getenv("GIT_COMMIT")
+    dirty_env = os.getenv("GIT_DIRTY")
+
     if commit:
-        return commit, os.getenv("GIT_DIRTY", "false").lower()
+        dirty = dirty_env.lower() if dirty_env else "false"
+        return commit, dirty
 
     try:
         commit = (
@@ -59,8 +62,8 @@ def get_git_info():
             != ""
         )
         return commit, "true" if is_dirty else "false"
-    except Exception:
-        return "unknown", "true"
+    except Exception as e:
+        raise RuntimeError("No se pudo obtener git_commit y git_dirty") from e
 
 
 def compute_sha256(filepath):
@@ -74,26 +77,16 @@ def compute_sha256(filepath):
 def train_with_mlflow(
     config, model, train_loader, val_loader, optimizer, criterion, device, tags=None
 ):
-    if tags is None:
-        tags = {}
+    tags = tags.copy() if tags else {}
 
     run_kind = tags.get("run_kind", "")
     grid_row = tags.get("grid_row", "")
-
     if run_kind not in {"smoke", "campaign"}:
         raise ValueError(f"run_kind debe ser 'smoke' o 'campaign', se recibió '{run_kind}'")
     if run_kind == "smoke" and grid_row != "":
         raise ValueError("grid_row debe estar vacío para run_kind 'smoke'")
     if run_kind == "campaign" and not re.match(r"^r(0[1-9]|1[0-2])$", grid_row):
         raise ValueError(f"grid_row inválido para campaign: {grid_row}")
-
-    mlflow.set_experiment("clasificador-perro-gato")
-    early_stopping = EarlyStopping(patience=config.patience, min_delta=config.min_delta)
-    start_time = time.time()
-    curves_data = []
-
-    commit, dirty = get_git_info()
-    tags.update({"git_commit": commit, "git_dirty": dirty})
 
     meta_path = os.getenv("MANIFEST_META_PATH", "reports/manifests/v0.1.1/manifest_meta.json")
     if not os.path.exists(meta_path):
@@ -104,21 +97,35 @@ def train_with_mlflow(
         tags["manifest_id"] = meta.get("manifest_id")
         tags["manifest_sha256"] = meta.get("manifest_sha256")
         tags["classes"] = json.dumps(meta.get("classes", {}))
-        tags["release"] = meta.get("release", {}).get("name", "unknown")
+        tags["release"] = meta.get("release", {}).get("name")
 
-    tags["python_version"] = platform.python_version()
-    tags["torch_version"] = torch.__version__
-    tags["torchvision_version"] = torchvision.__version__
-    tags["platform"] = platform.platform()
-    tags["device"] = str(device)
+    commit, dirty = get_git_info()
+    tags.update(
+        {
+            "git_commit": commit,
+            "git_dirty": dirty,
+            "python_version": platform.python_version(),
+            "torch_version": torch.__version__,
+            "torchvision_version": torchvision.__version__,
+            "platform": platform.platform(),
+            "device": str(device),
+        }
+    )
+
+    mlflow.set_experiment("clasificador-perro-gato")
+    early_stopping = EarlyStopping(patience=config.patience, min_delta=config.min_delta)
+    start_time = time.time()
+    curves_data = []
 
     if getattr(config, "seed_aug", None) is not None:
         torch.manual_seed(config.seed_aug)
 
     with mlflow.start_run() as run:
         mlflow.log_params(config.model_dump())
-        mlflow.set_tags(tags)
+        if isinstance(optimizer, torch.optim.SGD):
+            mlflow.log_param("momentum", optimizer.param_groups[0].get("momentum", 0.0))
 
+        mlflow.set_tags(tags)
         stopped_epoch = config.max_epochs
 
         for epoch in range(1, config.max_epochs + 1):
@@ -140,6 +147,9 @@ def train_with_mlflow(
                 stopped_epoch = epoch
                 break
 
+        if early_stopping.best_weights is None:
+            raise RuntimeError("No se generó checkpoint/best.pt (val_loss no mejoró o fue NaN).")
+
         mlflow.log_metric("duration_s", time.time() - start_time)
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -147,13 +157,11 @@ def train_with_mlflow(
             pd.DataFrame(curves_data).to_csv(curves_path, index=False)
             mlflow.log_artifact(curves_path)
 
-            if early_stopping.best_weights is not None:
-                model.load_state_dict(early_stopping.best_weights)
-                best_pt_path = os.path.join(tmpdir, "best.pt")
-                torch.save(early_stopping.best_weights, best_pt_path)
-                mlflow.log_artifact(best_pt_path, artifact_path="checkpoint")
-
-                mlflow.set_tag("checkpoint_sha256", compute_sha256(best_pt_path))
+            model.load_state_dict(early_stopping.best_weights)
+            best_pt_path = os.path.join(tmpdir, "best.pt")
+            torch.save(early_stopping.best_weights, best_pt_path)
+            mlflow.log_artifact(best_pt_path, artifact_path="checkpoint")
+            mlflow.set_tag("checkpoint_sha256", compute_sha256(best_pt_path))
 
         mlflow.log_metric("best_epoch", early_stopping.best_epoch)
         mlflow.log_metric("best_val_loss", early_stopping.best_loss)
