@@ -178,6 +178,57 @@ permite ningún otro cambio.
   base y artefactos) versionado con DVC, para que se pueda restaurar en un clon
   limpio.
 
+### Contrato de cada corrida
+
+Lo que toda corrida de entrenamiento deja en MLflow. Lo escribe
+`app/training/tracking.py` (P3-08) y lo leen la campaña (P3-10), la validación
+y la selección (P3-11), la página Experiments (P3-12) y el paquete del modelo
+(P3-14). Una corrida a la que le falte algo de esta lista no cuenta como válida.
+
+- **Experimento:** `clasificador-perro-gato`, uno solo para el smoke test y la
+  campaña.
+- **Parámetros:** todos los campos de `TrainingConfig` (los 7 de la rejilla, las
+  4 semillas, `patience` y `min_delta`), con `config.model_dump()`. Con SGD,
+  también `momentum`.
+- **Tags:**
+
+  | Tag | Valor |
+  |---|---|
+  | `git_commit` | SHA completo de `HEAD` |
+  | `git_dirty` | `true` si hay cambios sin commitear; P3-11 descarta esas corridas |
+  | `release` | `release.name` de `manifest_meta.json` (`v0.1.1`) |
+  | `manifest_id` y `manifest_sha256` | los de `manifest_meta.json` |
+  | `classes` | `classes` de `manifest_meta.json` en JSON: `{"0": "cat", "1": "dog"}` |
+  | `run_kind` | `smoke` o `campaign`; solo `campaign` cuenta para P3-11 |
+  | `grid_row` | la fila de la sección 7 (`r01`…`r12`); vacío en `smoke` |
+  | `checkpoint_sha256` | SHA-256 de `checkpoint/best.pt` |
+  | `python_version` | `platform.python_version()` |
+  | `torch_version` y `torchvision_version` | `torch.__version__` y `torchvision.__version__` |
+  | `platform` | `platform.platform()` (sistema y arquitectura donde corrió) |
+  | `device` | `cpu`, `cuda` o `mps` |
+
+- **Métricas por época**, con `step` = época (desde 1): `train_loss`,
+  `train_accuracy`, `val_loss`, `val_accuracy` y `val_macro_f1`.
+  `train_accuracy` se calcula durante la misma pasada de entrenamiento, sin
+  recorrer `train` otra vez (duplicaría el tiempo por corrida de la sección 7).
+- **Métricas finales**, sin `step`: `best_epoch`, `stopped_epoch`,
+  `best_val_loss`, `best_val_accuracy`, `best_val_macro_f1` y `duration_s`.
+  Las `best_*` son las de la época restaurada; P3-11 selecciona con ellas y no
+  con el último valor por época, que es el de la época de parada.
+- **Artefactos:**
+  - `checkpoint/best.pt`: `state_dict` de la mejor época (sección 4), el que se
+    carga desde un proceso nuevo en el smoke test;
+  - `curves.csv`: una fila por época con las cinco métricas por época.
+- **Estado:** `FINISHED` si termina; `FAILED` si hay una excepción (se registra
+  y se vuelve a lanzar); `KILLED` si se cancela desde Training (P3-09).
+- **Prohibido:** registrar cualquier métrica `test_*` o cargar el split `test`
+  durante el entrenamiento. El test solo se toca después de MODEL SELECTION
+  CLOSED (sección 11).
+
+La prueba de contrato de P3-08 corre una corrida corta contra un MLflow
+temporal y verifica cada punto de esta lista, incluido el estado `FAILED` ante
+un fallo controlado.
+
 ## 9. S3 para modelos
 
 - Todos los buckets del proyecto viven en la cuenta de Karen (`222629887955`):
