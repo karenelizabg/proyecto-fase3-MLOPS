@@ -195,6 +195,7 @@ def test_run_writes_quality_json(tmp_path, monkeypatch):
     monkeypatch.setenv("MINIO_BUCKET", "bucket")
     monkeypatch.setenv("DATASET_DIR", str(dataset_dir))
     monkeypatch.setenv("REPORTS_DIR", str(reports_dir))
+    monkeypatch.setenv("DERIVED_DIR", str(tmp_path / "derived"))
 
     report = run(Settings())
 
@@ -216,6 +217,7 @@ def test_main_returns_nonzero_exit_code_when_failed(tmp_path, monkeypatch):
     monkeypatch.setenv("MINIO_BUCKET", "bucket")
     monkeypatch.setenv("DATASET_DIR", str(dataset_dir))
     monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "reports"))
+    monkeypatch.setenv("DERIVED_DIR", str(tmp_path / "derived"))
     # El quality.yaml real (min_images_per_class=300) siempre falla contra
     # un dataset sintético de cuatro imágenes: exit code 1 garantizado.
 

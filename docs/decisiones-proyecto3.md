@@ -232,11 +232,16 @@ un fallo controlado.
 ## 9. S3 para modelos
 
 - Todos los buckets del proyecto viven en la cuenta de Karen (`222629887955`):
-  el remote DVC, los releases y el bucket nuevo de modelos `mlops-p3-*`, con
-  versionado activo. El equipo entra con IAM Identity Center (rol `MLOpsP3`).
-  La ruta exacta del bucket de modelos se anota aquí cuando exista.
-- Prefijo: `models/clasificador-perro-gato/<semver>/`.
-- Nunca se sobrescribe una versión publicada.
+  el remote DVC, los releases y el bucket de modelos. El equipo entra con IAM
+  Identity Center (rol `MLOpsP3`).
+- Bucket de modelos: `mlops-p3-models-222629887955` (`us-east-1`), con
+  versionado activo, acceso público bloqueado, cifrado SSE-S3 y una política
+  que rechaza todo acceso sin HTTPS.
+- Ruta de cada versión:
+  `s3://mlops-p3-models-222629887955/models/clasificador-perro-gato/<semver>/`.
+- Nunca se sobrescribe una versión publicada. El rol `MLOpsP3` puede leer y
+  subir, pero no puede borrar versiones de objetos, suspender el versionado ni
+  cambiar la política del bucket.
 
 ## 10. Versiones del modelo
 

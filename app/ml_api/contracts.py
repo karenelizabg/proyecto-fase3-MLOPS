@@ -25,6 +25,9 @@ class ContractModel(BaseModel):
 
 
 TrainingJobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
+# Contrato de MLflow (docs/decisiones-proyecto3.md sección 8, P3-08): 'smoke'
+# es el smoke test de P3-10, 'campaign' una fila de la rejilla de P3-01.
+RunKind = Literal["smoke", "campaign"]
 
 
 class TrainingJob(ContractModel):
@@ -34,6 +37,8 @@ class TrainingJob(ContractModel):
     config: dict[str, JsonValue]
     dataset_release: str
     manifest_id: str
+    run_kind: RunKind
+    grid_row: str | None
     mlflow_run_id: str | None
     error: str | None
     logs: list[str]

@@ -14,6 +14,7 @@ os.environ.setdefault("MINIO_SECRET_KEY", "unused")
 os.environ.setdefault("MINIO_BUCKET", "unused")
 os.environ.setdefault("DATASET_DIR", str(REPO_ROOT / "data" / "raw"))
 os.environ.setdefault("REPORTS_DIR", str(REPO_ROOT / "reports"))
+os.environ.setdefault("DERIVED_DIR", str(REPO_ROOT / "data" / "derived"))
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

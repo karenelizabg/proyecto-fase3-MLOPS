@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     reports_dir: Path
     dataset_version: str = "local-dev"
 
+    # P3-09: ml-api necesita `data/derived/manifests/<release>/manifest.csv` para
+    # reverificar la fuga de un manifiesto antes de crear un training_job (no le
+    # basta confiar en que `manifest_meta.json` ya lo garantizó al construirse).
+    derived_dir: Path
+
     # Copilot (P2-52). Opcional: el gate y el resto del pipeline no la necesitan,
     # así que su ausencia solo deshabilita el chat, no impide arrancar.
     anthropic_api_key: SecretStr | None = None

@@ -144,35 +144,38 @@ copies el password, la sesión SSO o las credenciales de otra persona.
 Ejecuta:
 
 ```bash
-aws configure sso --profile mlops-p2
+aws configure sso --profile mlops-p3
 ```
 
 Cuando la CLI lo solicite, responde:
 
 | Pregunta | Valor |
 |---|---|
-| SSO session name | `mlops-p2` |
-| SSO start URL | `https://d-90667fbedf.awsapps.com/start` |
+| SSO session name | `mlops-p3` |
+| SSO start URL | `https://d-906661b14b.awsapps.com/start` |
 | SSO region | `us-east-1` |
 | Registration scopes | `sso:account:access` |
 
 Se abrirá el navegador. Inicia sesión con **tu propio usuario** de IAM
-Identity Center, selecciona la cuenta que te haya asignado el administrador y
-elige el permission set que te haya autorizado. El README no fija nombres de
-usuarios, contraseñas, cuentas ni identificadores personales.
+Identity Center, selecciona la cuenta `222629887955` y el permission set
+`MLOpsP3`. Como región por defecto usa `us-east-1`. El README no fija nombres
+de usuarios ni contraseñas.
+
+Si ya tenías el perfil `mlops-p2` del proyecto 2, no lo reutilices: apunta a
+otro Identity Center y a otra cuenta. Crea `mlops-p3` como se indica arriba.
 
 Después inicia la sesión y comprueba la identidad efectiva:
 
 ```bash
-aws sso login --profile mlops-p2
-aws sts get-caller-identity --profile mlops-p2
+aws sso login --profile mlops-p3
+aws sts get-caller-identity --profile mlops-p3
 ```
 
-La salida debe corresponder a tu sesión autorizada. Cuando expire, normalmente
+El `Arn` de la salida debe contener `AWSReservedSSO_MLOpsP3_`. Cuando expire, normalmente
 basta con renovar la sesión:
 
 ```bash
-aws sso login --profile mlops-p2
+aws sso login --profile mlops-p3
 ```
 
 La configuración del perfil y la caché de la sesión se guardan fuera del
@@ -184,7 +187,7 @@ proyecto ni los compartas.
 Con `.venv-dvc` activado, configura el remote `prod` solo en tu máquina:
 
 ```bash
-dvc remote modify --local prod profile mlops-p2
+dvc remote modify --local prod profile mlops-p3
 git check-ignore .dvc/config.local
 dvc remote list
 ```
@@ -200,13 +203,13 @@ Estas comprobaciones son de lectura y no modifican datos:
 ```bash
 aws s3api head-bucket \
   --bucket mlops-p2-dvc-cache-222629887955 \
-  --profile mlops-p2
+  --profile mlops-p3
 
 aws s3api list-objects-v2 \
   --bucket mlops-p2-dvc-cache-222629887955 \
   --max-keys 1 \
   --query KeyCount \
-  --profile mlops-p2
+  --profile mlops-p3
 ```
 
 Si terminan correctamente, tu sesión puede alcanzar el bucket y tiene los
@@ -250,7 +253,7 @@ MinIO y no tienen relación con AWS SSO.
 
 ### 11. Terraform (opcional y autorizado)
 
-Terraform local puede usar el perfil AWS `mlops-p2` mediante la cadena normal de
+Terraform local puede usar el perfil AWS `mlops-p3` mediante la cadena normal de
 credenciales. GitHub Actions usa OIDC, que es un mecanismo distinto; OIDC de
 GitHub no autentica automáticamente tu Mac. No ejecutes `terraform apply` ni
 `terraform destroy` como parte del onboarding. Tampoco inicialices el backend
@@ -435,7 +438,7 @@ ignora todo `.env*` salvo las plantillas de ejemplo.
 | `MAX_UPLOAD_SIZE_BYTES` | Tamaño máximo por imagen (5 MiB por defecto)   |
 
 Los `.env` son configuración local de Compose/backend/MinIO/Copilot. Las
-credenciales AWS se obtienen mediante el perfil SSO `mlops-p2`; nunca las
+credenciales AWS se obtienen mediante el perfil SSO `mlops-p3`; nunca las
 copies a un `.env`.
 
 ## API
@@ -640,7 +643,7 @@ openssl rand -hex 32
 ```
 
 No uses claves AWS en `.env`. La autenticación de AWS se configura con IAM
-Identity Center / SSO y el perfil local `mlops-p2`.
+Identity Center / SSO y el perfil local `mlops-p3`.
 
 `frontend/.env.example` es independiente y no cambia para este ticket.
 
@@ -766,7 +769,7 @@ Los binarios se guardan en MinIO, no directamente en GitHub.
 ### AWS S3 y remote `prod`
 
 La configuración completa de AWS CLI, IAM Identity Center / SSO, el perfil
-`mlops-p2`, las comprobaciones de lectura y la conexión local de DVC está en
+`mlops-p3`, las comprobaciones de lectura y la conexión local de DVC está en
 [Onboarding de desarrollo](#onboarding-de-desarrollo). `prod` usa AWS S3 real,
 sin endpoint personalizado, en `us-east-1`:
 
