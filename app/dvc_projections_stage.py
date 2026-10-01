@@ -19,6 +19,7 @@ def main() -> None:
     settings = Settings(
         dataset_dir=REPO_ROOT / "data/raw",
         reports_dir=REPO_ROOT / "reports",
+        derived_dir=REPO_ROOT / "data/derived",
         dataset_version=config.dataset_version,
         # Required by shared Settings, unused by this local-only stage.
         database_url="unused",

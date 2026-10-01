@@ -12,7 +12,9 @@ from storage.settings import Settings
 CATEGORY_IDS = {"dog": 3, "cat": 4}
 
 
-def mcp_settings(monkeypatch, dataset_dir: Path, reports_dir: Path) -> Settings:
+def mcp_settings(
+    monkeypatch, dataset_dir: Path, reports_dir: Path, derived_dir: Path | None = None
+) -> Settings:
     monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://u:p@localhost/db")
     monkeypatch.setenv("MINIO_ENDPOINT", "localhost")
     monkeypatch.setenv("MINIO_PORT", "9000")
@@ -21,6 +23,9 @@ def mcp_settings(monkeypatch, dataset_dir: Path, reports_dir: Path) -> Settings:
     monkeypatch.setenv("MINIO_BUCKET", "bucket")
     monkeypatch.setenv("DATASET_DIR", str(dataset_dir))
     monkeypatch.setenv("REPORTS_DIR", str(reports_dir))
+    # P3-09: ml-api la necesita para reverificar el manifiesto; el resto de
+    # servicios que usan este fixture (Copilot, MCP) nunca la leen.
+    monkeypatch.setenv("DERIVED_DIR", str(derived_dir or dataset_dir.parent / "derived"))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     return Settings(_env_file=None)
 

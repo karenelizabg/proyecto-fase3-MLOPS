@@ -17,12 +17,12 @@ import os
 from pathlib import Path
 
 import yaml
-from manifest.build import ManifestError, build_manifest, manifest_csv_bytes
-from manifest.check_leakage import find_leakage, read_manifest
-from manifest.config import ManifestConfig, load_manifest_config
 
 from analyzers.duplicates import analyze_duplicates
 from ingestion.loader import load_raw_dataset
+from manifest.build import ManifestError, build_manifest, manifest_csv_bytes
+from manifest.check_leakage import find_leakage, read_manifest
+from manifest.config import ManifestConfig, load_manifest_config
 from policies.duplicates import load_duplicate_config
 from policies.invalid_boxes import load_invalid_box_config
 
