@@ -43,11 +43,26 @@ def evaluate_epoch(model, dataloader, criterion, device):
 
 
 def get_git_info():
+    """`commit`/`dirty` reales de la corrida (contrato de MLflow, sección 8).
+
+    Revisión de #48/P3-09 sobre `scripts/build_trainer.sh`: el `ARG
+    GIT_COMMIT=unknown` de `Dockerfile.ml` es un default válido para Docker,
+    no para una corrida -- si alguien construye con `docker compose up
+    --build` sin pasar por ese script, `GIT_COMMIT` llega como la cadena
+    literal "unknown" y, sin esta validación, se registraría tal cual en
+    MLflow sin que nada la rechace (P3-11 descartaría la campaña completa
+    después, no antes). Falla aquí, antes de `mlflow.start_run()` (ver
+    `train_with_mlflow`), para no dejar una corrida a medias.
+    """
     commit = os.getenv("GIT_COMMIT")
     dirty_env = os.getenv("GIT_DIRTY")
 
     if commit:
-        dirty = dirty_env.lower() if dirty_env else "false"
+        if commit.strip().lower() in ("", "unknown"):
+            raise RuntimeError("GIT_COMMIT inválido: construye con scripts/build_trainer.sh")
+        dirty = (dirty_env or "").strip().lower()
+        if dirty not in ("true", "false"):
+            raise RuntimeError("GIT_DIRTY debe ser 'true' o 'false' cuando viene GIT_COMMIT")
         return commit, dirty
 
     try:
