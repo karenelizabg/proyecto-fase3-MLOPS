@@ -202,6 +202,10 @@ y la selección (P3-11), la página Experiments (P3-12) y el paquete del modelo
   | `run_kind` | `smoke` o `campaign`; solo `campaign` cuenta para P3-11 |
   | `grid_row` | la fila de la sección 7 (`r01`…`r12`); vacío en `smoke` |
   | `checkpoint_sha256` | SHA-256 de `checkpoint/best.pt` |
+  | `python_version` | `platform.python_version()` |
+  | `torch_version` y `torchvision_version` | `torch.__version__` y `torchvision.__version__` |
+  | `platform` | `platform.platform()` (sistema y arquitectura donde corrió) |
+  | `device` | `cpu`, `cuda` o `mps` |
 
 - **Métricas por época**, con `step` = época (desde 1): `train_loss`,
   `train_accuracy`, `val_loss`, `val_accuracy` y `val_macro_f1`.
