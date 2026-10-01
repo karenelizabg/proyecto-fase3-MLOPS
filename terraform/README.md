@@ -63,7 +63,7 @@ Referencia: [terraform validate](https://developer.hashicorp.com/terraform/cli/c
 ### Autenticación local y límites de onboarding
 
 Cuando una tarea de Terraform requiera consultar AWS y el administrador lo haya
-autorizado, Terraform local puede usar el perfil AWS `mlops-p2` mediante la
+autorizado, Terraform local puede usar el perfil AWS `mlops-p3` mediante la
 cadena normal de credenciales del SDK. Ese perfil se obtiene con IAM Identity
 Center / SSO; no se deben guardar access keys, contraseñas, sesiones ni tokens
 en este repositorio.
