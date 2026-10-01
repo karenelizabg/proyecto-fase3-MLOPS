@@ -28,9 +28,26 @@ export class MlApiError extends Error {
 }
 
 function defaultMessageForStatus(status: number): string {
+  if (status === 400) return "Solicitud inválida.";
   if (status === 404) return "No se encontró el recurso solicitado.";
   if (status >= 500) return "Error del servidor. Intenta de nuevo.";
   return `Error inesperado (${status}).`;
+}
+
+/** `ml-api` responde `{"error": "..."}` (ver `ml_api/server.py`): se muestra
+ * ese motivo real -- p. ej. "el manifiesto de 'v0.1.1' tiene fuga" -- en vez
+ * de un "Solicitud inválida" genérico. */
+async function extractErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const body: unknown = await res.json();
+    if (body !== null && typeof body === "object" && "error" in body) {
+      const error = (body as { error: unknown }).error;
+      if (typeof error === "string") return error;
+    }
+    return fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function mlApiRequest<T>(
@@ -46,7 +63,10 @@ export async function mlApiRequest<T>(
   }
 
   if (!res.ok) {
-    throw new MlApiError(res.status, defaultMessageForStatus(res.status));
+    throw new MlApiError(
+      res.status,
+      await extractErrorMessage(res, defaultMessageForStatus(res.status))
+    );
   }
 
   const json: unknown = await res.json();

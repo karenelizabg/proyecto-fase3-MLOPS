@@ -3,6 +3,7 @@ import pytest
 import torch
 from PIL import Image
 from pydantic import ValidationError
+
 from training.config import TrainingConfig
 from training.model import build_model
 from training.preprocess import get_preprocessing_transforms

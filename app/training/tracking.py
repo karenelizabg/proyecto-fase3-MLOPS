@@ -12,6 +12,7 @@ import pandas as pd
 import torch
 import torchvision
 from sklearn.metrics import accuracy_score, f1_score
+
 from training.trainer import EarlyStopping, train_epoch
 
 
@@ -42,11 +43,26 @@ def evaluate_epoch(model, dataloader, criterion, device):
 
 
 def get_git_info():
+    """`commit`/`dirty` reales de la corrida (contrato de MLflow, sección 8).
+
+    Revisión de #48/P3-09 sobre `scripts/build_trainer.sh`: el `ARG
+    GIT_COMMIT=unknown` de `Dockerfile.ml` es un default válido para Docker,
+    no para una corrida -- si alguien construye con `docker compose up
+    --build` sin pasar por ese script, `GIT_COMMIT` llega como la cadena
+    literal "unknown" y, sin esta validación, se registraría tal cual en
+    MLflow sin que nada la rechace (P3-11 descartaría la campaña completa
+    después, no antes). Falla aquí, antes de `mlflow.start_run()` (ver
+    `train_with_mlflow`), para no dejar una corrida a medias.
+    """
     commit = os.getenv("GIT_COMMIT")
     dirty_env = os.getenv("GIT_DIRTY")
 
     if commit:
-        dirty = dirty_env.lower() if dirty_env else "false"
+        if commit.strip().lower() in ("", "unknown"):
+            raise RuntimeError("GIT_COMMIT inválido: construye con scripts/build_trainer.sh")
+        dirty = (dirty_env or "").strip().lower()
+        if dirty not in ("true", "false"):
+            raise RuntimeError("GIT_DIRTY debe ser 'true' o 'false' cuando viene GIT_COMMIT")
         return commit, dirty
 
     try:
@@ -75,8 +91,26 @@ def compute_sha256(filepath):
 
 
 def train_with_mlflow(
-    config, model, train_loader, val_loader, optimizer, criterion, device, tags=None
+    config,
+    model,
+    train_loader,
+    val_loader,
+    optimizer,
+    criterion,
+    device,
+    tags=None,
+    on_epoch=None,
+    on_run_started=None,
 ):
+    """`on_epoch(epoch, max_epochs, train_loss, val_loss, val_accuracy)` opcional (P3-09):
+    lo llama trainer-worker al final de cada época para ir guardando progreso/heartbeat
+    en `training_jobs` mientras la corrida sigue viva, sin que esta función sepa nada
+    de esa tabla ni de cómo se reporta -- solo avisa que una época terminó.
+
+    `on_run_started(run_id)` opcional (revisión de Uriel sobre P3-09): avisa el
+    `mlflow_run_id` en cuanto el run existe, no solo al terminar -- si el
+    worker muere a medio entrenar, sin esto `training_jobs.mlflow_run_id`
+    nunca se llena, y nadie puede cerrar ese run huérfano en MLflow."""
     tags = tags.copy() if tags else {}
 
     run_kind = tags.get("run_kind", "")
@@ -121,6 +155,9 @@ def train_with_mlflow(
         torch.manual_seed(config.seed_aug)
 
     with mlflow.start_run() as run:
+        if on_run_started is not None:
+            on_run_started(run.info.run_id)
+
         mlflow.log_params(config.model_dump())
         if isinstance(optimizer, torch.optim.SGD):
             mlflow.log_param("momentum", optimizer.param_groups[0].get("momentum", 0.0))
@@ -141,6 +178,9 @@ def train_with_mlflow(
             }
             mlflow.log_metrics(metrics, step=epoch)
             curves_data.append(metrics)
+
+            if on_epoch is not None:
+                on_epoch(epoch, config.max_epochs, train_loss, val_loss, val_acc)
 
             early_stopping(val_loss, val_acc, val_macro_f1, model, epoch)
             if early_stopping.early_stop:

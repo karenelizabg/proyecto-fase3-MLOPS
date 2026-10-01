@@ -9,6 +9,7 @@ x-pipeline-env: &pipeline-env
   MINIO_BUCKET: image-annotations
   DATASET_DIR: /app/data/raw
   REPORTS_DIR: /app/reports
+  DERIVED_DIR: /app/data/derived
 
 services:
   mariadb:
@@ -202,6 +203,16 @@ services:
     build:
       context: ./app
       dockerfile: Dockerfile.ml
+      # Revisión de Uriel sobre P3-09: el commit que cuenta es el que de
+      # verdad se copió a la imagen (Dockerfile.ml), no el checkout del host
+      # en el momento en que arranca el contenedor. Se hornea aquí, una sola
+      # vez por build; `get_git_info()` (P3-08) ya prioriza estas variables
+      # sobre `git` en vivo. Si GIT_COMMIT/GIT_DIRTY no están en el entorno
+      # del host al hacer `docker compose build`, exportalas antes (ver
+      # scripts/build_trainer.sh) -- si no, la imagen queda con "unknown".
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GIT_DIRTY: ${GIT_DIRTY:-unknown}
     depends_on:
       mariadb:
         condition: service_healthy
@@ -213,6 +224,7 @@ services:
       AWS_PROFILE: ${AWS_PROFILE:?Define AWS_PROFILE en .env (el perfil SSO del equipo, ej. mlops-p3)}
     volumes:
       - ./data/raw:/app/data/raw:ro
+      - ./data/derived:/app/data/derived:ro
       - ./reports:/app/reports:ro
       # Solo lectura: el rol MLOpsP3 del equipo, nunca credenciales estáticas
       # horneadas en la imagen (M2/P3-00b).
@@ -236,6 +248,11 @@ services:
       <<: *pipeline-env
       MLFLOW_TRACKING_URI: http://mlflow:5000
       ML_API_HOST: 0.0.0.0
+    volumes:
+      # P3-09: solo lectura -- ml-api valida (reports/releases, manifest.csv),
+      # nunca escribe el dataset derivado.
+      - ./data/derived:/app/data/derived:ro
+      - ./reports:/app/reports:ro
     restart: on-failure:5
 
 volumes:
