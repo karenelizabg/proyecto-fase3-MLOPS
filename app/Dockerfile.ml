@@ -13,8 +13,12 @@ WORKDIR /app
 # A diferencia del Dockerfile base: SÍ necesita un home real. trainer-worker
 # monta ~/.aws de solo lectura ahí (docker-compose.yml) para el perfil SSO
 # del equipo, y boto3 resuelve las credenciales vía $HOME/.aws/credentials.
+# `HOME` se define recién antes de `USER appuser` (no aquí): si se define
+# antes, `uv sync` (que todavía corre como root) escribe su propio caché
+# bajo $HOME/.cache/uv como root, y appuser ya no puede crear nada dentro de
+# ese ~/.cache más tarde (p. ej. los pesos de torchvision) -- probado real,
+# "Permission denied: '/home/appuser/.cache/torch'" al entrenar.
 RUN useradd --system --create-home --home-dir /home/appuser appuser
-ENV HOME=/home/appuser
 
 COPY pyproject.toml uv.lock ./
 ENV UV_HTTP_TIMEOUT=180
@@ -39,6 +43,9 @@ COPY ml_worker/ ./ml_worker/
 COPY ml_api/ ./ml_api/
 
 ENV PATH="/app/.venv/bin:$PATH"
+ENV HOME=/home/appuser
+# Por si algún paso anterior ya dejó algo ahí como root (defensivo).
+RUN chown -R appuser:appuser /home/appuser
 USER appuser
 
 CMD ["python", "-m", "ml_worker"]

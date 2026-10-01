@@ -1,4 +1,4 @@
-"""`ml_api.repository._row_to_job` (P3-03).
+"""`ml_api.repository.row_to_job` (P3-03).
 
 No corre contra una MariaDB real -- CI no levanta una para el job de `app/`
 (ver CONTRIBUTING.md) -- pero la forma de fila que usa está tomada de una
@@ -10,7 +10,7 @@ que es justo lo que esta prueba fija.
 
 from datetime import datetime
 
-from ml_api.repository import _row_to_job
+from ml_api.repository import row_to_job
 
 
 def test_row_to_job_parses_json_columns_from_raw_text():
@@ -27,7 +27,7 @@ def test_row_to_job_parses_json_columns_from_raw_text():
         datetime(2026, 9, 29, 21, 23, 26),
     )
 
-    job = _row_to_job(row)
+    job = row_to_job(row)
 
     assert job.id == "r01"
     assert job.status == "running"
@@ -51,7 +51,7 @@ def test_row_to_job_handles_a_finished_job_with_mlflow_run_and_no_logs():
         datetime(2026, 9, 29, 22, 0, 0),
     )
 
-    job = _row_to_job(row)
+    job = row_to_job(row)
 
     assert job.status == "completed"
     assert job.progress == 1.0

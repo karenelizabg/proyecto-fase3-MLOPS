@@ -38,7 +38,12 @@ def train_with_mlflow(
     criterion,
     device,
     experiment_name="P3_Campaign",
+    on_epoch=None,
 ):
+    """`on_epoch(epoch, max_epochs, train_loss, val_loss, val_accuracy)` opcional (P3-09):
+    lo llama trainer-worker al final de cada época para ir guardando progreso/heartbeat
+    en `training_jobs` mientras la corrida sigue viva, sin que esta función sepa nada
+    de esa tabla ni de cómo se reporta -- solo avisa que una época terminó."""
     mlflow.set_experiment(experiment_name)
     early_stopping = EarlyStopping(patience=config.patience, min_delta=config.min_delta)
 
@@ -63,6 +68,9 @@ def train_with_mlflow(
                 },
                 step=epoch,
             )
+
+            if on_epoch is not None:
+                on_epoch(epoch, config.max_epochs, train_loss, val_loss, val_acc)
 
             early_stopping(val_loss, model, epoch)
             if early_stopping.early_stop:

@@ -14,13 +14,13 @@ from sqlalchemy import Engine, text
 
 from ml_api.contracts import TrainingJob
 
-_SELECT_COLUMNS = """
+SELECT_COLUMNS = """
     `id`, `status`, `progress`, `config`, `dataset_release`, `manifest_id`,
     `mlflow_run_id`, `error`, `logs`, `heartbeat_at`
 """
 
 
-def _row_to_job(row: Sequence) -> TrainingJob:
+def row_to_job(row: Sequence) -> TrainingJob:
     (
         id_,
         status,
@@ -50,10 +50,10 @@ def _row_to_job(row: Sequence) -> TrainingJob:
 
 
 def list_training_jobs(engine: Engine) -> list[TrainingJob]:
-    query = text(f"SELECT {_SELECT_COLUMNS} FROM `training_jobs` ORDER BY `updated_at` DESC")
+    query = text(f"SELECT {SELECT_COLUMNS} FROM `training_jobs` ORDER BY `updated_at` DESC")
     with engine.connect() as connection:
         rows = connection.execute(query).fetchall()
-    return [_row_to_job(row) for row in rows]
+    return [row_to_job(row) for row in rows]
 
 
 def create_training_job(

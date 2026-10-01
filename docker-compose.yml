@@ -214,6 +214,7 @@ services:
       AWS_PROFILE: ${AWS_PROFILE:?Define AWS_PROFILE en .env (el perfil SSO del equipo, ej. mlops-p3)}
     volumes:
       - ./data/raw:/app/data/raw:ro
+      - ./data/derived:/app/data/derived:ro
       - ./reports:/app/reports:ro
       # Solo lectura: el rol MLOpsP3 del equipo, nunca credenciales estáticas
       # horneadas en la imagen (M2/P3-00b).
