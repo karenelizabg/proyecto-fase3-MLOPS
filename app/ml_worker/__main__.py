@@ -27,7 +27,7 @@ from ml_worker.repository import (
     reclaim_stale_jobs,
     update_progress,
 )
-from ml_worker.run_training import dataset_paths, run_training_subprocess
+from ml_worker.run_training import dataset_paths, manifest_meta_path, run_training_subprocess
 from storage.db import get_engine
 from storage.settings import Settings
 
@@ -41,11 +41,11 @@ QUEUE_POLL_TIMEOUT_SECONDS = 2.0
 # conocida del worker único de hoy, no un límite pensado para varios workers.
 HEARTBEAT_STALE_SECONDS = 600
 
-SpawnFn = Callable[[TrainingJob, Path, Path], tuple[Any, Any]]
+SpawnFn = Callable[[TrainingJob, Path, Path, Path], tuple[Any, Any]]
 
 
 def _spawn_training_process(
-    job: TrainingJob, manifest_path: Path, crops_root: Path
+    job: TrainingJob, manifest_path: Path, crops_root: Path, meta_path: Path
 ) -> tuple[multiprocessing.Process, multiprocessing.Queue]:
     queue: multiprocessing.Queue = multiprocessing.Queue()
     process = multiprocessing.Process(
@@ -54,7 +54,7 @@ def _spawn_training_process(
         # así que `heartbeat_at` tiene que seguir siendo un `datetime` real para que
         # `TrainingJob(**job_payload)` lo acepte del otro lado -- pickle (lo que usa
         # `multiprocessing` para pasar los argumentos) ya sabe serializar `datetime`.
-        args=(job.model_dump(), str(manifest_path), str(crops_root), queue),
+        args=(job.model_dump(), str(manifest_path), str(crops_root), str(meta_path), queue),
     )
     process.start()
     return process, queue
@@ -65,11 +65,13 @@ def process_one_job(
     job: TrainingJob,
     *,
     derived_dir: Path,
+    reports_dir: Path,
     spawn: SpawnFn = _spawn_training_process,
 ) -> None:
     """Corre `job` hasta terminar (completed/failed) y deja la base al día."""
     manifest_path, crops_root = dataset_paths(derived_dir, job.dataset_release)
-    process, queue = spawn(job, manifest_path, crops_root)
+    meta_path = manifest_meta_path(reports_dir, job.dataset_release)
+    process, queue = spawn(job, manifest_path, crops_root, meta_path)
 
     finished = False
     try:
@@ -145,7 +147,9 @@ def main() -> None:
             continue
 
         logger.info("Reclamado %s (release=%s).", job.id, job.dataset_release)
-        process_one_job(engine, job, derived_dir=settings.derived_dir)
+        process_one_job(
+            engine, job, derived_dir=settings.derived_dir, reports_dir=settings.reports_dir
+        )
 
 
 if __name__ == "__main__":

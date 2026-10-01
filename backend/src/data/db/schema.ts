@@ -254,6 +254,20 @@ export const trainingJobs = mysqlTable(
       length: 100,
     }).notNull(),
 
+    // Contrato de MLflow (docs/decisiones-proyecto3.md sección 8, P3-08):
+    // 'smoke' (P3-10 punto 1) o 'campaign' (una fila de la rejilla de P3-01).
+    // Van en columnas propias, no dentro de `config`, porque no son
+    // hiperparámetros del modelo -- son procedencia de la corrida, y
+    // `training.TrainingConfig` es `extra="forbid"` (P3-05): meterlos ahí
+    // rompería esa validación en vez de la suya propia.
+    runKind: mysqlEnum('run_kind', ['smoke', 'campaign']).notNull(),
+
+    // Fila de la rejilla de P3-01 (ej. "r01"), solo para run_kind='campaign';
+    // null en 'smoke'. Mismo patrón r0[1-9]|r1[0-2] que valida tracking.py.
+    gridRow: varchar('grid_row', {
+      length: 10,
+    }),
+
     // Null hasta que MLflow crea el run real.
     mlflowRunId: varchar('mlflow_run_id', {
       length: 100,

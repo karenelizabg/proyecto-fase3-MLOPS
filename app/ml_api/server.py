@@ -28,7 +28,7 @@ from storage.settings import Settings
 logger = logging.getLogger("ml-api")
 
 ListJobs = Callable[[], list[TrainingJob]]
-CreateJob = Callable[[str, str, dict], TrainingJob]
+CreateJob = Callable[[str, str, dict, str, str | None], TrainingJob]
 
 _PENDING = {
     "experiments": PendingEndpoint(
@@ -55,8 +55,13 @@ def create_app(
     settings = settings if settings is not None else Settings()
     list_jobs = list_jobs or (lambda: list_training_jobs(get_engine()))
     create_job = create_job or (
-        lambda dataset_release, manifest_id, config: create_training_job(
-            get_engine(), dataset_release=dataset_release, manifest_id=manifest_id, config=config
+        lambda dataset_release, manifest_id, config, run_kind, grid_row: create_training_job(
+            get_engine(),
+            dataset_release=dataset_release,
+            manifest_id=manifest_id,
+            config=config,
+            run_kind=run_kind,
+            grid_row=grid_row,
         )
     )
 
@@ -76,18 +81,31 @@ def create_app(
             return JSONResponse({"error": "falta dataset_release (str)"}, status_code=400)
         if not isinstance(payload.get("config"), dict):
             return JSONResponse({"error": "falta config (obj)"}, status_code=400)
+        if not isinstance(payload.get("run_kind"), str):
+            return JSONResponse({"error": "falta run_kind (str)"}, status_code=400)
+        grid_row = payload.get("grid_row")
+        if grid_row is not None and not isinstance(grid_row, str):
+            return JSONResponse({"error": "grid_row debe ser str o null"}, status_code=400)
 
         try:
             validated_config, manifest_id = validate_new_training_job(
                 dataset_release=payload["dataset_release"],
                 config=payload["config"],
+                run_kind=payload["run_kind"],
+                grid_row=grid_row,
                 reports_dir=settings.reports_dir,
                 derived_dir=settings.derived_dir,
             )
         except TrainingJobRejected as error:
             return JSONResponse({"error": str(error)}, status_code=400)
 
-        job = create_job(payload["dataset_release"], manifest_id, validated_config.model_dump())
+        job = create_job(
+            payload["dataset_release"],
+            manifest_id,
+            validated_config.model_dump(),
+            payload["run_kind"],
+            grid_row,
+        )
         return JSONResponse(job.model_dump(mode="json"), status_code=201)
 
     def pending(name: str):

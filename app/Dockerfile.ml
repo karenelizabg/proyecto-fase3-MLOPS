@@ -8,6 +8,13 @@ FROM python:3.12-slim
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /usr/local/bin/uv
 
+# P3-08: `training.tracking.get_git_info()` corre `git rev-parse HEAD` para
+# registrar el commit real de cada corrida (contrato de MLflow, sección 8);
+# docker-compose.yml monta `.git` de solo lectura en trainer-worker para que
+# tenga algo real que inspeccionar.
+RUN apt-get update && apt-get install --no-install-recommends -y git \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # A diferencia del Dockerfile base: SÍ necesita un home real. trainer-worker

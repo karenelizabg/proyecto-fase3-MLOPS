@@ -212,10 +212,27 @@ services:
       <<: *pipeline-env
       MLFLOW_TRACKING_URI: http://mlflow:5000
       AWS_PROFILE: ${AWS_PROFILE:?Define AWS_PROFILE en .env (el perfil SSO del equipo, ej. mlops-p3)}
+      # P3-08: `get_git_info()` corre `git rev-parse HEAD`/`git status --porcelain`
+      # de verdad -- apuntan a /repo (todo el repo, montado aparte de /app) en vez
+      # de /app porque /app solo tiene los paquetes Python que copia Dockerfile.ml;
+      # con GIT_DIR/GIT_WORK_TREE en /app, "git status" vería como "borrado" casi
+      # todo el repo (backend/, frontend/, etc.) y reportaría git_dirty=true siempre.
+      GIT_DIR: /repo/.git
+      GIT_WORK_TREE: /repo
+      # El mount queda con otro dueño (UID del host) y con bits de permiso
+      # distintos a los del commit -- sin esto, git rechaza el repo por
+      # "dubious ownership" y "git status" marca dirty por el modo de archivo,
+      # no por un cambio real.
+      GIT_CONFIG_COUNT: "2"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
+      GIT_CONFIG_KEY_1: core.fileMode
+      GIT_CONFIG_VALUE_1: "false"
     volumes:
       - ./data/raw:/app/data/raw:ro
       - ./data/derived:/app/data/derived:ro
       - ./reports:/app/reports:ro
+      - .:/repo:ro
       # Solo lectura: el rol MLOpsP3 del equipo, nunca credenciales estáticas
       # horneadas en la imagen (M2/P3-00b).
       - ~/.aws:/home/appuser/.aws:ro

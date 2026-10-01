@@ -16,7 +16,7 @@ from ml_api.contracts import TrainingJob
 
 SELECT_COLUMNS = """
     `id`, `status`, `progress`, `config`, `dataset_release`, `manifest_id`,
-    `mlflow_run_id`, `error`, `logs`, `heartbeat_at`
+    `run_kind`, `grid_row`, `mlflow_run_id`, `error`, `logs`, `heartbeat_at`
 """
 
 
@@ -28,6 +28,8 @@ def row_to_job(row: Sequence) -> TrainingJob:
         config,
         dataset_release,
         manifest_id,
+        run_kind,
+        grid_row,
         mlflow_run_id,
         error,
         logs,
@@ -42,6 +44,8 @@ def row_to_job(row: Sequence) -> TrainingJob:
         config=json.loads(config),
         dataset_release=dataset_release,
         manifest_id=manifest_id,
+        run_kind=run_kind,
+        grid_row=grid_row,
         mlflow_run_id=mlflow_run_id,
         error=error,
         logs=json.loads(logs),
@@ -57,7 +61,13 @@ def list_training_jobs(engine: Engine) -> list[TrainingJob]:
 
 
 def create_training_job(
-    engine: Engine, *, dataset_release: str, manifest_id: str, config: dict
+    engine: Engine,
+    *,
+    dataset_release: str,
+    manifest_id: str,
+    config: dict,
+    run_kind: str,
+    grid_row: str | None,
 ) -> TrainingJob:
     """Inserta un `training_job` en `queued` y devuelve la fila creada.
 
@@ -71,6 +81,8 @@ def create_training_job(
         config=config,
         dataset_release=dataset_release,
         manifest_id=manifest_id,
+        run_kind=run_kind,
+        grid_row=grid_row,
         mlflow_run_id=None,
         error=None,
         logs=[],
@@ -78,8 +90,10 @@ def create_training_job(
     )
     query = text(
         "INSERT INTO `training_jobs` "
-        "(`id`, `status`, `progress`, `config`, `dataset_release`, `manifest_id`, `logs`) "
-        "VALUES (:id, :status, :progress, :config, :dataset_release, :manifest_id, :logs)"
+        "(`id`, `status`, `progress`, `config`, `dataset_release`, `manifest_id`, "
+        " `run_kind`, `grid_row`, `logs`) "
+        "VALUES (:id, :status, :progress, :config, :dataset_release, :manifest_id, "
+        "        :run_kind, :grid_row, :logs)"
     )
     with engine.begin() as connection:
         connection.execute(
@@ -91,6 +105,8 @@ def create_training_job(
                 "config": json.dumps(job.config),
                 "dataset_release": job.dataset_release,
                 "manifest_id": job.manifest_id,
+                "run_kind": job.run_kind,
+                "grid_row": job.grid_row,
                 "logs": json.dumps(job.logs),
             },
         )

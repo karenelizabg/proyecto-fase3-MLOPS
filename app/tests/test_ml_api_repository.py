@@ -21,6 +21,8 @@ def test_row_to_job_parses_json_columns_from_raw_text():
         '{"optimizer": "adam", "batch": 32}',
         "v0.1.1",
         "manifest-abc",
+        "campaign",
+        "r01",
         None,
         None,
         '["epoch 1 done"]',
@@ -32,6 +34,8 @@ def test_row_to_job_parses_json_columns_from_raw_text():
     assert job.id == "r01"
     assert job.status == "running"
     assert job.config == {"optimizer": "adam", "batch": 32}
+    assert job.run_kind == "campaign"
+    assert job.grid_row == "r01"
     assert job.logs == ["epoch 1 done"]
     assert job.mlflow_run_id is None
     assert job.error is None
@@ -45,6 +49,8 @@ def test_row_to_job_handles_a_finished_job_with_mlflow_run_and_no_logs():
         "{}",
         "v0.1.1",
         "manifest-abc",
+        "smoke",
+        None,
         "mlflow-run-42",
         None,
         "[]",
@@ -55,5 +61,7 @@ def test_row_to_job_handles_a_finished_job_with_mlflow_run_and_no_logs():
 
     assert job.status == "completed"
     assert job.progress == 1.0
+    assert job.run_kind == "smoke"
+    assert job.grid_row is None
     assert job.mlflow_run_id == "mlflow-run-42"
     assert job.logs == []

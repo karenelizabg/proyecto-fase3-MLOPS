@@ -4,6 +4,7 @@
 no uno inventado aparte.
 """
 
+import json
 from datetime import datetime
 from pathlib import Path
 from queue import Queue
@@ -14,7 +15,12 @@ pytest.importorskip("torch")
 pytest.importorskip("mlflow")
 
 from ml_api.contracts import TrainingJob
-from ml_worker.run_training import dataset_paths, run_training, run_training_subprocess
+from ml_worker.run_training import (
+    dataset_paths,
+    manifest_meta_path,
+    run_training,
+    run_training_subprocess,
+)
 
 VALID_CONFIG = {
     "optimizer": "adam",
@@ -41,6 +47,8 @@ def a_job(**overrides) -> TrainingJob:
         "config": VALID_CONFIG,
         "dataset_release": "vtest",
         "manifest_id": "vtest-abc",
+        "run_kind": "smoke",
+        "grid_row": None,
         "mlflow_run_id": None,
         "error": None,
         "logs": [],
@@ -58,13 +66,32 @@ def mlflow_local_tracking(tmp_path, monkeypatch):
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
 
 
+@pytest.fixture
+def meta_path(tmp_path) -> Path:
+    """`manifest_meta.json` real (P3-08 lo exige vía MANIFEST_META_PATH)."""
+    path = manifest_meta_path(tmp_path, "vtest")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "manifest_id": "vtest-abc",
+                "manifest_sha256": "deadbeef",
+                "classes": {"0": "cat", "1": "dog"},
+                "release": {"name": "vtest"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
 def test_dataset_paths_join_derived_dir_with_the_release():
     manifest_path, crops_root = dataset_paths(Path("/data/derived"), "v0.1.1")
     assert manifest_path == Path("/data/derived/manifests/v0.1.1/manifest.csv")
     assert crops_root == Path("/data/derived/crops")
 
 
-def test_run_training_returns_a_real_run_id_and_reports_every_epoch(mock_dataset_env):
+def test_run_training_returns_a_real_run_id_and_reports_every_epoch(mock_dataset_env, meta_path):
     manifest_path, crops_root = mock_dataset_env
     job = a_job()
     epochs_seen = []
@@ -73,7 +100,11 @@ def test_run_training_returns_a_real_run_id_and_reports_every_epoch(mock_dataset
         epochs_seen.append((epoch, max_epochs))
 
     run_id = run_training(
-        job, manifest_path=Path(manifest_path), crops_root=Path(crops_root), on_epoch=on_epoch
+        job,
+        manifest_path=Path(manifest_path),
+        crops_root=Path(crops_root),
+        meta_path=meta_path,
+        on_epoch=on_epoch,
     )
 
     assert isinstance(run_id, str) and run_id
@@ -84,16 +115,28 @@ def test_run_training_returns_a_real_run_id_and_reports_every_epoch(mock_dataset
     assert all(max_epochs == 15 for _epoch, max_epochs in epochs_seen)
 
 
-def test_run_training_works_without_an_on_epoch_callback(mock_dataset_env):
+def test_run_training_works_without_an_on_epoch_callback(mock_dataset_env, meta_path):
     manifest_path, crops_root = mock_dataset_env
     job = a_job(config={**VALID_CONFIG, "patience": 0})
 
-    run_id = run_training(job, manifest_path=Path(manifest_path), crops_root=Path(crops_root))
+    run_id = run_training(
+        job, manifest_path=Path(manifest_path), crops_root=Path(crops_root), meta_path=meta_path
+    )
 
     assert isinstance(run_id, str) and run_id
 
 
-def test_run_training_subprocess_accepts_the_payload_spawn_sends_it(mock_dataset_env):
+def test_run_training_rejects_campaign_without_a_grid_row(mock_dataset_env, meta_path):
+    manifest_path, crops_root = mock_dataset_env
+    job = a_job(config={**VALID_CONFIG, "patience": 0}, run_kind="campaign", grid_row=None)
+
+    with pytest.raises(ValueError, match="grid_row"):
+        run_training(
+            job, manifest_path=Path(manifest_path), crops_root=Path(crops_root), meta_path=meta_path
+        )
+
+
+def test_run_training_subprocess_accepts_the_payload_spawn_sends_it(mock_dataset_env, meta_path):
     """Regresión: `_spawn_training_process` le pasa `job.model_dump()` (no
     `mode="json"`) a este subproceso -- con `mode="json"` `heartbeat_at`
     llega como texto, y `TrainingJob` (`strict=True`) lo rechaza al
@@ -106,7 +149,7 @@ def test_run_training_subprocess_accepts_the_payload_spawn_sends_it(mock_dataset
     payload = job.model_dump()
     queue = Queue()
 
-    run_training_subprocess(payload, manifest_path, crops_root, queue)
+    run_training_subprocess(payload, manifest_path, crops_root, str(meta_path), queue)
 
     messages = []
     while not queue.empty():

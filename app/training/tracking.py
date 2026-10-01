@@ -12,6 +12,7 @@ import pandas as pd
 import torch
 import torchvision
 from sklearn.metrics import accuracy_score, f1_score
+
 from training.trainer import EarlyStopping, train_epoch
 
 
@@ -75,8 +76,12 @@ def compute_sha256(filepath):
 
 
 def train_with_mlflow(
-    config, model, train_loader, val_loader, optimizer, criterion, device, tags=None
+    config, model, train_loader, val_loader, optimizer, criterion, device, tags=None, on_epoch=None
 ):
+    """`on_epoch(epoch, max_epochs, train_loss, val_loss, val_accuracy)` opcional (P3-09):
+    lo llama trainer-worker al final de cada época para ir guardando progreso/heartbeat
+    en `training_jobs` mientras la corrida sigue viva, sin que esta función sepa nada
+    de esa tabla ni de cómo se reporta -- solo avisa que una época terminó."""
     tags = tags.copy() if tags else {}
 
     run_kind = tags.get("run_kind", "")
@@ -141,6 +146,9 @@ def train_with_mlflow(
             }
             mlflow.log_metrics(metrics, step=epoch)
             curves_data.append(metrics)
+
+            if on_epoch is not None:
+                on_epoch(epoch, config.max_epochs, train_loss, val_loss, val_acc)
 
             early_stopping(val_loss, val_acc, val_macro_f1, model, epoch)
             if early_stopping.early_stop:

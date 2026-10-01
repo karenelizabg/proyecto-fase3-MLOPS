@@ -39,6 +39,8 @@ def a_job(**overrides) -> TrainingJob:
         "config": {"optimizer": "adam"},
         "dataset_release": "v0.1.1",
         "manifest_id": "manifest-abc",
+        "run_kind": "smoke",
+        "grid_row": None,
         "mlflow_run_id": None,
         "error": None,
         "logs": ["epoch 1 done"],
@@ -92,10 +94,10 @@ class _RecordingCreateJob:
     """Espía: prueba que ninguna fila se crea cuando la solicitud se rechaza."""
 
     def __init__(self):
-        self.calls: list[tuple[str, str, dict]] = []
+        self.calls: list[tuple[str, str, dict, str, str | None]] = []
 
-    def __call__(self, dataset_release, manifest_id, config):
-        self.calls.append((dataset_release, manifest_id, config))
+    def __call__(self, dataset_release, manifest_id, config, run_kind, grid_row):
+        self.calls.append((dataset_release, manifest_id, config, run_kind, grid_row))
         return a_job(
             id="new-job",
             status="queued",
@@ -103,6 +105,8 @@ class _RecordingCreateJob:
             dataset_release=dataset_release,
             manifest_id=manifest_id,
             config=config,
+            run_kind=run_kind,
+            grid_row=grid_row,
             logs=[],
         )
 
@@ -114,10 +118,43 @@ def test_create_job_rejects_invalid_config_without_creating_a_row(monkeypatch, t
 
     bad_config = {**VALID_TRAINING_CONFIG, "batch_size": 7}  # 7 no es 16 ni 32
     response = client.post(
-        "/training/jobs", json={"dataset_release": "v0.1.1", "config": bad_config}
+        "/training/jobs",
+        json={"dataset_release": "v0.1.1", "config": bad_config, "run_kind": "smoke"},
     )
 
     assert response.status_code == 400
+    assert recorder.calls == []
+
+
+def test_create_job_rejects_missing_run_kind_without_creating_a_row(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    write_manifest(reports_dir=tmp_path / "reports", derived_dir=tmp_path / "derived")
+
+    response = client.post(
+        "/training/jobs", json={"dataset_release": "v0.1.1", "config": VALID_TRAINING_CONFIG}
+    )
+
+    assert response.status_code == 400
+    assert recorder.calls == []
+
+
+def test_create_job_rejects_campaign_without_a_grid_row(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    write_manifest(reports_dir=tmp_path / "reports", derived_dir=tmp_path / "derived")
+
+    response = client.post(
+        "/training/jobs",
+        json={
+            "dataset_release": "v0.1.1",
+            "config": VALID_TRAINING_CONFIG,
+            "run_kind": "campaign",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "grid_row" in response.json()["error"]
     assert recorder.calls == []
 
 
@@ -128,7 +165,7 @@ def test_create_job_rejects_unknown_release_without_creating_a_row(monkeypatch, 
 
     response = client.post(
         "/training/jobs",
-        json={"dataset_release": "v9.9.9", "config": VALID_TRAINING_CONFIG},
+        json={"dataset_release": "v9.9.9", "config": VALID_TRAINING_CONFIG, "run_kind": "smoke"},
     )
 
     assert response.status_code == 400
@@ -144,7 +181,7 @@ def test_create_job_rejects_a_failed_release_without_creating_a_row(monkeypatch,
 
     response = client.post(
         "/training/jobs",
-        json={"dataset_release": "v0.1.1", "config": VALID_TRAINING_CONFIG},
+        json={"dataset_release": "v0.1.1", "config": VALID_TRAINING_CONFIG, "run_kind": "smoke"},
     )
 
     assert response.status_code == 400
@@ -159,7 +196,7 @@ def test_create_job_rejects_a_leaking_manifest_without_creating_a_row(monkeypatc
 
     response = client.post(
         "/training/jobs",
-        json={"dataset_release": "v0.1.1", "config": VALID_TRAINING_CONFIG},
+        json={"dataset_release": "v0.1.1", "config": VALID_TRAINING_CONFIG, "run_kind": "smoke"},
     )
 
     assert response.status_code == 400
@@ -176,16 +213,42 @@ def test_create_job_accepts_a_valid_request_and_creates_exactly_one_row(monkeypa
 
     response = client.post(
         "/training/jobs",
-        json={"dataset_release": "v0.1.1", "config": VALID_TRAINING_CONFIG},
+        json={"dataset_release": "v0.1.1", "config": VALID_TRAINING_CONFIG, "run_kind": "smoke"},
     )
 
     assert response.status_code == 201
     assert len(recorder.calls) == 1
-    called_release, called_manifest_id, called_config = recorder.calls[0]
+    called_release, called_manifest_id, called_config, called_run_kind, called_grid_row = (
+        recorder.calls[0]
+    )
     assert called_release == "v0.1.1"
     assert called_manifest_id == manifest_id
     assert called_config == VALID_TRAINING_CONFIG
+    assert called_run_kind == "smoke"
+    assert called_grid_row is None
     assert response.json()["status"] == "queued"
+
+
+def test_create_job_accepts_a_valid_campaign_request_with_grid_row(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    write_manifest(
+        reports_dir=tmp_path / "reports", derived_dir=tmp_path / "derived", quality_status="warning"
+    )
+
+    response = client.post(
+        "/training/jobs",
+        json={
+            "dataset_release": "v0.1.1",
+            "config": VALID_TRAINING_CONFIG,
+            "run_kind": "campaign",
+            "grid_row": "r01",
+        },
+    )
+
+    assert response.status_code == 201
+    assert len(recorder.calls) == 1
+    assert recorder.calls[0][3:] == ("campaign", "r01")
 
 
 def test_create_job_rejects_a_non_object_body(monkeypatch, tmp_path):

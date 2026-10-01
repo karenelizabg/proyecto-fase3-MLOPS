@@ -25,6 +25,8 @@ def a_job(**overrides) -> TrainingJob:
         "config": {"optimizer": "adam"},
         "dataset_release": "v0.1.1",
         "manifest_id": "manifest-abc",
+        "run_kind": "smoke",
+        "grid_row": None,
         "mlflow_run_id": None,
         "error": None,
         "logs": [],
@@ -79,10 +81,12 @@ def test_applies_each_progress_message_and_then_completed(recorder, tmp_path):
         {"type": "completed", "mlflow_run_id": "run-42"},
     ]
 
-    def spawn(_job, _manifest_path, _crops_root):
+    def spawn(_job, _manifest_path, _crops_root, _meta_path):
         return FakeProcess(), FakeQueue(messages)
 
-    process_one_job(engine=object(), job=job, derived_dir=tmp_path, spawn=spawn)
+    process_one_job(
+        engine=object(), job=job, derived_dir=tmp_path, reports_dir=tmp_path, spawn=spawn
+    )
 
     assert recorder == [
         ("update_progress", "job-1", {"progress": 0.5, "log_line": "época 1/2"}),
@@ -98,10 +102,12 @@ def test_applies_failed_message_and_stops(recorder, tmp_path):
         {"type": "failed", "error": "CUDA out of memory"},
     ]
 
-    def spawn(_job, _manifest_path, _crops_root):
+    def spawn(_job, _manifest_path, _crops_root, _meta_path):
         return FakeProcess(), FakeQueue(messages)
 
-    process_one_job(engine=object(), job=job, derived_dir=tmp_path, spawn=spawn)
+    process_one_job(
+        engine=object(), job=job, derived_dir=tmp_path, reports_dir=tmp_path, spawn=spawn
+    )
 
     assert recorder == [
         ("update_progress", "job-1", {"progress": 0.3, "log_line": "época 1/3"}),
@@ -112,10 +118,12 @@ def test_applies_failed_message_and_stops(recorder, tmp_path):
 def test_marks_failed_when_the_subprocess_dies_without_a_final_message(recorder, tmp_path):
     job = a_job()
 
-    def spawn(_job, _manifest_path, _crops_root):
+    def spawn(_job, _manifest_path, _crops_root, _meta_path):
         return FakeProcess(dies_silently=True, exitcode=137), FakeQueue([])
 
-    process_one_job(engine=object(), job=job, derived_dir=tmp_path, spawn=spawn)
+    process_one_job(
+        engine=object(), job=job, derived_dir=tmp_path, reports_dir=tmp_path, spawn=spawn
+    )
 
     assert len(recorder) == 1
     name, job_id, kwargs = recorder[0]
@@ -123,18 +131,24 @@ def test_marks_failed_when_the_subprocess_dies_without_a_final_message(recorder,
     assert "137" in kwargs["error"]
 
 
-def test_spawn_receives_the_dataset_paths_built_from_derived_dir(tmp_path, monkeypatch):
+def test_spawn_receives_the_dataset_and_meta_paths_built_from_release(tmp_path, monkeypatch):
     monkeypatch.setattr("ml_worker.__main__.update_progress", lambda *a, **k: None)
     monkeypatch.setattr("ml_worker.__main__.mark_completed", lambda *a, **k: None)
     job = a_job(dataset_release="v0.1.1")
     received = {}
 
-    def spawn(_job, manifest_path, crops_root):
+    def spawn(_job, manifest_path, crops_root, meta_path):
         received["manifest_path"] = manifest_path
         received["crops_root"] = crops_root
+        received["meta_path"] = meta_path
         return FakeProcess(), FakeQueue([{"type": "completed", "mlflow_run_id": "run-1"}])
 
-    process_one_job(engine=object(), job=job, derived_dir=tmp_path, spawn=spawn)
+    derived_dir = tmp_path / "derived"
+    reports_dir = tmp_path / "reports"
+    process_one_job(
+        engine=object(), job=job, derived_dir=derived_dir, reports_dir=reports_dir, spawn=spawn
+    )
 
-    assert received["manifest_path"] == tmp_path / "manifests" / "v0.1.1" / "manifest.csv"
-    assert received["crops_root"] == tmp_path / "crops"
+    assert received["manifest_path"] == derived_dir / "manifests" / "v0.1.1" / "manifest.csv"
+    assert received["crops_root"] == derived_dir / "crops"
+    assert received["meta_path"] == reports_dir / "manifests" / "v0.1.1" / "manifest_meta.json"

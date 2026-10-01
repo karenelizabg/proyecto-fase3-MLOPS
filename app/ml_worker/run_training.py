@@ -4,6 +4,7 @@ dentro del subproceso que lanza `ml_worker.__main__` -- no conoce
 `training_jobs` ni MariaDB, solo entrena y opcionalmente avisa por época.
 """
 
+import os
 from pathlib import Path
 
 import torch
@@ -29,6 +30,12 @@ def dataset_paths(derived_dir: Path, dataset_release: str) -> tuple[Path, Path]:
     return derived_dir / "manifests" / dataset_release / "manifest.csv", derived_dir / "crops"
 
 
+def manifest_meta_path(reports_dir: Path, dataset_release: str) -> Path:
+    """`reports/manifests/<release>/manifest_meta.json`, lo que `train_with_mlflow`
+    (P3-08) lee vía `MANIFEST_META_PATH` para los tags de procedencia."""
+    return reports_dir / "manifests" / dataset_release / "manifest_meta.json"
+
+
 def _build_optimizer(config: TrainingConfig, model: nn.Module) -> torch.optim.Optimizer:
     if config.optimizer == "adam":
         return torch.optim.Adam(model.parameters(), lr=config.learning_rate)
@@ -40,9 +47,17 @@ def run_training(
     *,
     manifest_path: Path,
     crops_root: Path,
+    meta_path: Path,
     on_epoch=None,
 ) -> str:
-    """Corre el entrenamiento completo de `job`; devuelve el `mlflow_run_id`."""
+    """Corre el entrenamiento completo de `job`; devuelve el `mlflow_run_id`.
+
+    `MANIFEST_META_PATH` se define aquí, no la recibe `train_with_mlflow`
+    como parámetro -- lee esa variable de entorno ella misma (P3-08). Como
+    esto corre en su propio subproceso (`run_training_subprocess`), mutar el
+    entorno aquí no se filtra a otros trabajos que corran en paralelo.
+    """
+    os.environ["MANIFEST_META_PATH"] = str(meta_path)
     config = TrainingConfig.model_validate(job.config)
     device = torch.device("cpu")
 
@@ -82,12 +97,14 @@ def run_training(
         optimizer,
         criterion,
         device,
-        experiment_name=f"P3_{job.dataset_release}",
+        tags={"run_kind": job.run_kind, "grid_row": job.grid_row or ""},
         on_epoch=on_epoch,
     )
 
 
-def run_training_subprocess(job_payload: dict, manifest_path: str, crops_root: str, queue) -> None:
+def run_training_subprocess(
+    job_payload: dict, manifest_path: str, crops_root: str, meta_path: str, queue
+) -> None:
     """Punto de entrada del subproceso que lanza `ml_worker.__main__` (P3-09).
 
     No toca `training_jobs` ni MariaDB directo: todo lo que sabe reportar
@@ -114,7 +131,11 @@ def run_training_subprocess(job_payload: dict, manifest_path: str, crops_root: s
 
     try:
         run_id = run_training(
-            job, manifest_path=Path(manifest_path), crops_root=Path(crops_root), on_epoch=on_epoch
+            job,
+            manifest_path=Path(manifest_path),
+            crops_root=Path(crops_root),
+            meta_path=Path(meta_path),
+            on_epoch=on_epoch,
         )
     except Exception as error:  # el padre lo guarda en `training_jobs.error`, legible
         queue.put({"type": "failed", "error": str(error)})

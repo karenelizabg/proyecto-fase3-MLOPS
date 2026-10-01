@@ -10,12 +10,19 @@ asumir que la otra ya lo hizo.
 """
 
 import json
+import re
 from pathlib import Path
 
 from pydantic import ValidationError
 
 from manifest.check_leakage import find_leakage, read_manifest
 from training.config import TrainingConfig
+
+# Mismas reglas que `training.tracking.train_with_mlflow` (P3-08, sección 8 de
+# docs/decisiones-proyecto3.md) -- repetidas aquí a propósito: rechazar un
+# run_kind/grid_row inválido antes de crear la fila es más barato que dejar
+# que el worker lo descubra a medio entrenar.
+GRID_ROW_PATTERN = re.compile(r"^r(0[1-9]|1[0-2])$")
 
 
 class TrainingJobRejected(Exception):
@@ -26,19 +33,32 @@ def validate_new_training_job(
     *,
     dataset_release: str,
     config: dict,
+    run_kind: str,
+    grid_row: str | None,
     reports_dir: Path,
     derived_dir: Path,
 ) -> tuple[TrainingConfig, str]:
-    """Valida `config` y el release; devuelve (config validado, manifest_id).
+    """Valida `config`, `run_kind`/`grid_row` y el release; devuelve (config
+    validado, manifest_id).
 
-    Levanta `TrainingJobRejected` si `config` no cumple `TrainingConfig`, si no
-    hay un manifiesto para `dataset_release`, si su compuerta de calidad está
+    Levanta `TrainingJobRejected` si `config` no cumple `TrainingConfig`, si
+    `run_kind`/`grid_row` no cumplen el contrato de MLflow, si no hay un
+    manifiesto para `dataset_release`, si su compuerta de calidad está
     `failed`, o si el manifiesto tiene fuga entre particiones.
     """
     try:
         validated_config = TrainingConfig.model_validate(config)
     except ValidationError as error:
         raise TrainingJobRejected(f"config inválido: {error}") from error
+
+    if run_kind not in ("smoke", "campaign"):
+        raise TrainingJobRejected(
+            f"run_kind debe ser 'smoke' o 'campaign', se recibió {run_kind!r}"
+        )
+    if run_kind == "smoke" and grid_row:
+        raise TrainingJobRejected("grid_row debe estar vacío para run_kind 'smoke'")
+    if run_kind == "campaign" and not (grid_row and GRID_ROW_PATTERN.fullmatch(grid_row)):
+        raise TrainingJobRejected(f"grid_row inválido para campaign: {grid_row!r}")
 
     meta_path = reports_dir / "manifests" / dataset_release / "manifest_meta.json"
     if not meta_path.exists():
