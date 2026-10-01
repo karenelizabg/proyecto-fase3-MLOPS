@@ -25,19 +25,27 @@ Todas bajo `/ml-api/` (nginx, `frontend/docker/nginx.conf`), que reenvía al
 servicio `ml-api` (`docker-compose.yml`). El backend Node (`/api/`) no las
 expone: es un servicio Python aparte, no una ruta más del backend existente.
 
-| Ruta | Método | Contrato de respuesta | Estado en P3-03 |
+| Ruta | Método | Contrato | Estado |
 |---|---|---|---|
 | `/ml-api/health` | GET | `{"status": "ok"}` | Real |
-| `/ml-api/training/jobs` | GET | `TrainingJobList` | **Real** (lee `training_jobs`) |
+| `/ml-api/training/jobs` | GET | → `TrainingJobList` | Real (lee `training_jobs`) |
+| `/ml-api/training/jobs` | POST | `CreateTrainingJobRequest` → `TrainingJob` (201) | Real (P3-09) — valida y encola en `queued` |
 | `/ml-api/experiments` | GET | `PendingEndpoint` | Pendiente — P3-12 |
 | `/ml-api/evaluation` | GET | `PendingEndpoint` | Pendiente — P3-13 |
 | `/ml-api/models` | GET | `PendingEndpoint` | Pendiente — P3-14 |
 | `/ml-api/inference` | GET | `PendingEndpoint` | Pendiente — P3-16 |
 
-Ninguna ruta escribe todavía: `trainer-worker` (P3-09) es quien va a
-insertar/actualizar filas de `training_jobs` directo en MariaDB, no a través
-de `ml-api` — no hay round-trip HTTP en la escritura del progreso de una
-corrida, para no depender de que `ml-api` esté arriba mientras se entrena.
+El progreso de una corrida (`status`/`progress`/`logs`/`heartbeat_at`) lo
+escribe `trainer-worker` directo en MariaDB, no a través de `ml-api` — no hay
+round-trip HTTP ahí, para no depender de que `ml-api` esté arriba mientras se
+entrena. `ml-api` solo escribe la fila inicial, al encolar (`POST`).
+
+La página Training (P3-09) también lee directo, sin pasar por `ml-api`, los
+reportes estáticos que ya sirve nginx (`frontend/docker/nginx.conf`,
+`./reports:/usr/share/nginx/html/reports:ro`): `reports/versions.json` (el
+catálogo de releases, P2-45) y `reports/manifests/<release>/{manifest_meta,
+counts}.json` (P3-06) para el selector de release y la procedencia — no hace
+falta un endpoint nuevo para eso, ya existen como JSON versionado en Git.
 
 ## `TrainingJob`
 
@@ -52,11 +60,27 @@ no dos modelos independientes que puedan desincronizarse.
 | `progress` | `float` (0-1) | `trainer-worker`, fracción de `epocas_maximas` completadas | — |
 | `config` | `object` | `trainer-worker`, al encolar — los hiperparámetros de la corrida (optimizador, batch, lr, ...) | Forma exacta la define P3-07 |
 | `dataset_release` | `string` | `trainer-worker`, al encolar (ej. `"v0.1.1"`) | Columna `dataset_release`, no `release` — palabra reservada en SQL, confirmado con MariaDB real |
-| `manifest_id` | `string` | `trainer-worker`, al encolar — el manifiesto congelado (P3-06) usado | — |
+| `manifest_id` | `string` | `ml-api`, al encolar — resuelto desde `manifest_meta.json` del release | — |
+| `run_kind` | `"smoke" \| "campaign"` | Quien lanza la corrida, en el formulario de Training | Contrato de MLflow, `docs/decisiones-proyecto3.md` sección 8 |
+| `grid_row` | `string \| null` | Quien lanza la corrida, solo si `run_kind = "campaign"` | `null` en `smoke`; `r01`–`r12` en `campaign` |
 | `mlflow_run_id` | `string \| null` | `trainer-worker`, al crear el run en MLflow | `null` hasta que el run existe |
 | `error` | `string \| null` | `trainer-worker`, solo si `status = "failed"` | — |
 | `logs` | `string[]` | `trainer-worker`, líneas recientes (no el log completo — eso vive en MLflow) | — |
 | `heartbeat_at` | `string \| null` (ISO 8601) | `trainer-worker`, cada vez que sigue vivo | `null` antes de arrancar; sin heartbeat reciente + `status="running"` = corrida colgada |
+
+## `CreateTrainingJobRequest` (cuerpo del `POST`)
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `dataset_release` | `string` | Debe tener un manifiesto (`reports/manifests/<release>/manifest_meta.json`); `ml-api` revalida su compuerta y su fuga antes de encolar, no confía en que P3-06 ya lo garantizó |
+| `config` | `TrainingConfig` | Los 7 hiperparámetros de la rejilla, las 4 semillas, `patience` y `min_delta` (`app/training/config.py`) |
+| `run_kind` | `"smoke" \| "campaign"` | — |
+| `grid_row` | `string \| null` | `null`/vacío en `smoke`; `r01`–`r12` en `campaign` |
+
+Un `POST` inválido (config fuera de rango, release sin manifiesto, compuerta
+`failed`, manifiesto con fuga, o `run_kind`/`grid_row` que no cumplen la
+regla de arriba) responde `400` con `{"error": "..."}` y no crea ninguna
+fila.
 
 ## `PendingEndpoint`
 
