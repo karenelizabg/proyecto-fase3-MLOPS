@@ -11,7 +11,7 @@ from mlflow.tracking import MlflowClient
 from training.config import TrainingConfig
 from training.data import create_dataloader
 from training.model import build_model
-from training.tracking import compute_sha256, train_with_mlflow
+from training.tracking import compute_sha256, get_git_info, train_with_mlflow
 from training.trainer import EarlyStopping
 
 
@@ -175,6 +175,41 @@ def test_mlflow_contract(mock_dataset_env, tmp_path, monkeypatch):
     assert tags["checkpoint_sha256"] == compute_sha256(ckpt_path)
 
 
+def test_get_git_info_rejects_the_docker_arg_default_commit(monkeypatch):
+    """Revisión sobre #48/P3-09: `ARG GIT_COMMIT=unknown` (Dockerfile.ml) es un
+    default válido para Docker, no para una corrida -- construir sin pasar
+    por `scripts/build_trainer.sh` (p. ej. `docker compose up --build` en un
+    clon limpio) no debe registrar "unknown" en MLflow sin que nada lo
+    rechace."""
+    monkeypatch.setenv("GIT_COMMIT", "unknown")
+
+    with pytest.raises(RuntimeError, match="GIT_COMMIT"):
+        get_git_info()
+
+
+@pytest.mark.parametrize("dirty_value", [None, "", "unknown", "maybe"])
+def test_get_git_info_rejects_an_invalid_git_dirty(monkeypatch, dirty_value):
+    monkeypatch.setenv("GIT_COMMIT", "abc123")
+    if dirty_value is None:
+        monkeypatch.delenv("GIT_DIRTY", raising=False)
+    else:
+        monkeypatch.setenv("GIT_DIRTY", dirty_value)
+
+    with pytest.raises(RuntimeError, match="GIT_DIRTY"):
+        get_git_info()
+
+
+@pytest.mark.parametrize("dirty_value, expected", [("true", "true"), ("FALSE", "false")])
+def test_get_git_info_accepts_true_or_false_case_insensitive(monkeypatch, dirty_value, expected):
+    monkeypatch.setenv("GIT_COMMIT", "abc123")
+    monkeypatch.setenv("GIT_DIRTY", dirty_value)
+
+    commit, dirty = get_git_info()
+
+    assert commit == "abc123"
+    assert dirty == expected
+
+
 def test_mlflow_fails_without_manifest(mock_dataset_env, tmp_path, monkeypatch):
     monkeypatch.setenv("MANIFEST_META_PATH", "ruta_falsa/meta.json")
     config = TrainingConfig(
@@ -231,6 +266,7 @@ def test_mlflow_fails_on_nan_val_loss(mock_dataset_env, tmp_path, monkeypatch):
     monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
     monkeypatch.setenv("MANIFEST_META_PATH", str(tmp_path / "manifest_meta.json"))
     monkeypatch.setenv("GIT_COMMIT", "mock")
+    monkeypatch.setenv("GIT_DIRTY", "false")
     config = TrainingConfig(
         optimizer="adam",
         batch_size=16,
