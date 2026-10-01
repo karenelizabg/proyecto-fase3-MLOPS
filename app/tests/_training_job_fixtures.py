@@ -9,20 +9,16 @@ import csv
 import json
 from pathlib import Path
 
+from training.grid import FROZEN_MIN_DELTA, FROZEN_PATIENCE, FROZEN_SEEDS, GRID
+
+# r01 de la rejilla (docs/decisiones-proyecto3.md sección 7) + lo congelado
+# de las secciones 4 y 6 -- un config inventado ya no pasa la validación del
+# servidor (patience/min_delta/semillas), así que el fixture usa una fila real.
 VALID_TRAINING_CONFIG = {
-    "optimizer": "adam",
-    "batch_size": 16,
-    "max_epochs": 15,
-    "learning_rate": 0.001,
-    "image_size": 128,
-    "hidden_layers": 0,
-    "dropout": 0.0,
-    "seed_split": 42,
-    "seed_train": 43,
-    "seed_aug": 44,
-    "seed_model": 45,
-    "patience": 5,
-    "min_delta": 0.01,
+    **GRID["r01"],
+    **FROZEN_SEEDS,
+    "patience": FROZEN_PATIENCE,
+    "min_delta": FROZEN_MIN_DELTA,
 }
 
 

@@ -6,28 +6,31 @@ import type { DatasetRelease, QualityReport } from "@/pipeline/schemas";
 import { MlApiError } from "../api/client";
 import type { RunKind, TrainingConfig, TrainingJob } from "../api/contracts";
 import { createTrainingJobRequestSchema } from "../api/contracts";
+import {
+  FROZEN_MIN_DELTA,
+  FROZEN_PATIENCE,
+  FROZEN_SEEDS,
+  GRID,
+  gridRowDefaults,
+} from "../api/grid";
 import { useManifestCounts, useManifestMeta } from "../api/provenance";
-import { createTrainingJob, getTrainingJobs } from "../api/training";
+import { cancelTrainingJob, createTrainingJob, getTrainingJobs } from "../api/training";
 
 // MLflow (docker-compose.yml) publica su UI en localhost:5050; "#/runs/<id>"
 // es la ruta universal de MLflow que resuelve al experimento correcto sin
 // que training_jobs tenga que guardar el experiment_id aparte.
 const MLFLOW_RUN_URL = (runId: string) => `http://localhost:5050/#/runs/${runId}`;
 
+// Secciones 4 y 6 de docs/decisiones-proyecto3.md: congelados para
+// cualquier corrida -- el default ya no importa porque el campo ni se deja
+// editar (ver NumberField con `disabled`), pero arranca en el valor real
+// para que el formulario nunca muestre algo distinto a lo que de verdad se
+// manda.
 const DEFAULT_CONFIG: TrainingConfig = {
-  optimizer: "adam",
-  batch_size: 16,
-  max_epochs: 15,
-  learning_rate: 0.001,
-  image_size: 128,
-  hidden_layers: 0,
-  dropout: 0.0,
-  seed_split: 42,
-  seed_train: 43,
-  seed_aug: 44,
-  seed_model: 45,
-  patience: 5,
-  min_delta: 0.01,
+  ...GRID.r01,
+  ...FROZEN_SEEDS,
+  patience: FROZEN_PATIENCE,
+  min_delta: FROZEN_MIN_DELTA,
 };
 
 const inputClass = "rounded border border-border bg-surface p-2";
@@ -42,12 +45,14 @@ function SelectField<T extends string | number>({
   label,
   value,
   options,
+  disabled,
   onChange,
 }: {
   id: string;
   label: string;
   value: T;
   options: readonly T[];
+  disabled?: boolean;
   onChange: (value: T) => void;
 }) {
   return (
@@ -55,8 +60,9 @@ function SelectField<T extends string | number>({
       {label}
       <select
         id={id}
-        className={inputClass}
+        className={`${inputClass} disabled:opacity-60`}
         value={String(value)}
+        disabled={disabled}
         onChange={(event) => {
           const raw = event.target.value;
           const match = options.find((option) => String(option) === raw);
@@ -78,12 +84,14 @@ function NumberField({
   label,
   value,
   step,
+  disabled,
   onChange,
 }: {
   id: string;
   label: string;
   value: number;
   step?: string;
+  disabled?: boolean;
   onChange: (value: number) => void;
 }) {
   return (
@@ -91,10 +99,11 @@ function NumberField({
       {label}
       <input
         id={id}
-        className={inputClass}
+        className={`${inputClass} disabled:opacity-60`}
         type="number"
         step={step ?? "1"}
         value={Number.isFinite(value) ? value : ""}
+        disabled={disabled}
         onChange={(event) =>
           onChange(event.target.value === "" ? Number.NaN : Number(event.target.value))
         }
@@ -215,6 +224,16 @@ function LaunchForm({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  // Sección 7: una fila de la rejilla tiene un único combo válido -- al
+  // elegirla en campaign, los 7 parámetros se autocompletan y se bloquean
+  // (ver `gridLocked` más abajo) en vez de depender de que alguien los
+  // copie bien a mano 10 veces.
+  const gridDefaults = runKind === "campaign" ? gridRowDefaults(gridRow) : undefined;
+  const gridLocked = gridDefaults !== undefined;
+  useEffect(() => {
+    if (gridDefaults) setConfig((current) => ({ ...current, ...gridDefaults }));
+  }, [gridDefaults]);
+
   function field<K extends keyof TrainingConfig>(key: K) {
     return (value: TrainingConfig[K]) => setConfig((current) => ({ ...current, [key]: value }));
   }
@@ -286,6 +305,7 @@ function LaunchForm({
           label="Optimizador"
           value={config.optimizer}
           options={["adam", "sgd"] as const}
+          disabled={gridLocked}
           onChange={field("optimizer")}
         />
         <SelectField
@@ -293,6 +313,7 @@ function LaunchForm({
           label="Batch size"
           value={config.batch_size}
           options={[16, 32] as const}
+          disabled={gridLocked}
           onChange={field("batch_size")}
         />
         <SelectField
@@ -300,6 +321,7 @@ function LaunchForm({
           label="Épocas máximas"
           value={config.max_epochs}
           options={[15, 30] as const}
+          disabled={gridLocked}
           onChange={field("max_epochs")}
         />
         <SelectField
@@ -307,6 +329,7 @@ function LaunchForm({
           label="Tamaño de imagen"
           value={config.image_size}
           options={[128, 160] as const}
+          disabled={gridLocked}
           onChange={field("image_size")}
         />
         <SelectField
@@ -314,6 +337,7 @@ function LaunchForm({
           label="Capas ocultas"
           value={config.hidden_layers}
           options={[0, 1] as const}
+          disabled={gridLocked}
           onChange={field("hidden_layers")}
         />
         <SelectField
@@ -321,6 +345,7 @@ function LaunchForm({
           label="Dropout"
           value={config.dropout}
           options={[0.0, 0.3, 0.5] as const}
+          disabled={gridLocked}
           onChange={field("dropout")}
         />
         <NumberField
@@ -328,43 +353,51 @@ function LaunchForm({
           label="Learning rate"
           step="0.0001"
           value={config.learning_rate}
+          disabled={gridLocked}
           onChange={field("learning_rate")}
         />
+        {/* Secciones 4 y 6: congeladas para cualquier corrida, nunca editables. */}
         <NumberField
           id="patience"
-          label="Patience"
+          label="Patience (congelado)"
           value={config.patience}
+          disabled
           onChange={field("patience")}
         />
         <NumberField
           id="min_delta"
-          label="Min delta"
+          label="Min delta (congelado)"
           step="0.001"
           value={config.min_delta}
+          disabled
           onChange={field("min_delta")}
         />
         <NumberField
           id="seed_split"
-          label="Semilla (split)"
+          label="Semilla (split, congelada)"
           value={config.seed_split}
+          disabled
           onChange={field("seed_split")}
         />
         <NumberField
           id="seed_train"
-          label="Semilla (train)"
+          label="Semilla (train, congelada)"
           value={config.seed_train}
+          disabled
           onChange={field("seed_train")}
         />
         <NumberField
           id="seed_aug"
-          label="Semilla (aug)"
+          label="Semilla (aug, congelada)"
           value={config.seed_aug}
+          disabled
           onChange={field("seed_aug")}
         />
         <NumberField
           id="seed_model"
-          label="Semilla (modelo)"
+          label="Semilla (modelo, congelada)"
           value={config.seed_model}
+          disabled
           onChange={field("seed_model")}
         />
       </div>
@@ -382,7 +415,29 @@ function LaunchForm({
   );
 }
 
-function JobRow({ job }: { job: TrainingJob }) {
+// Revisión de Uriel sobre P3-09 ("no hay forma de cancelar"): solo
+// queued/running son cancelables -- el resto ya es un estado terminal
+// (mismo criterio que `TrainingJobNotCancellable` en ml_api/repository.py).
+const CANCELLABLE_STATUSES: ReadonlySet<TrainingJob["status"]> = new Set(["queued", "running"]);
+
+function JobRow({ job, onCancelled }: { job: TrainingJob; onCancelled: () => void }) {
+  const [cancelling, setCancelling] = useState(false);
+
+  async function handleCancel() {
+    setCancelling(true);
+    try {
+      await cancelTrainingJob(job.id);
+      onCancelled();
+    } catch {
+      // Lo más probable es que ya haya terminado entre que se pintó el botón
+      // y el click (race normal) -- refrescar la lista alcanza, sin bloquear
+      // el resto de la página por un solo cancel fallido.
+      onCancelled();
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   return (
     <li className="rounded-2xl border border-border bg-surface p-4 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -402,6 +457,16 @@ function JobRow({ job }: { job: TrainingJob }) {
           >
             ver en MLflow
           </a>
+        )}
+        {CANCELLABLE_STATUSES.has(job.status) && (
+          <button
+            type="button"
+            onClick={handleCancel}
+            disabled={cancelling}
+            className="ml-auto rounded-full border border-border px-3 py-1 text-xs disabled:opacity-40"
+          >
+            {cancelling ? "Cancelando…" : "Cancelar"}
+          </button>
         )}
       </div>
       {job.error && <p className="mt-1 text-xs text-status-pending">{job.error}</p>}
@@ -488,7 +553,7 @@ export function TrainingPage() {
           {jobsState.status === "success" && jobsState.jobs.length > 0 && (
             <ul className="flex flex-col gap-2">
               {jobsState.jobs.map((job) => (
-                <JobRow key={job.id} job={job} />
+                <JobRow key={job.id} job={job} onCancelled={loadJobs} />
               ))}
             </ul>
           )}

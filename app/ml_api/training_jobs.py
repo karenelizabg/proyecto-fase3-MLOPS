@@ -17,6 +17,7 @@ from pydantic import ValidationError
 
 from manifest.check_leakage import find_leakage, read_manifest
 from training.config import TrainingConfig
+from training.grid import FROZEN_MIN_DELTA, FROZEN_PATIENCE, FROZEN_SEEDS, GRID
 
 # Mismas reglas que `training.tracking.train_with_mlflow` (P3-08, sección 8 de
 # docs/decisiones-proyecto3.md) -- repetidas aquí a propósito: rechazar un
@@ -51,6 +52,24 @@ def validate_new_training_job(
     except ValidationError as error:
         raise TrainingJobRejected(f"config inválido: {error}") from error
 
+    # Secciones 4 y 6: congeladas para cualquier corrida, no solo para la
+    # rejilla -- un formulario con otro default (o alguien pegando un JSON a
+    # mano) no debe poder lanzar un early stopping ni unas semillas distintas
+    # a las que el resto del proyecto asume.
+    patience_ok = validated_config.patience == FROZEN_PATIENCE
+    min_delta_ok = validated_config.min_delta == FROZEN_MIN_DELTA
+    if not (patience_ok and min_delta_ok):
+        raise TrainingJobRejected(
+            f"patience/min_delta están congelados en {FROZEN_PATIENCE}/{FROZEN_MIN_DELTA} "
+            "(docs/decisiones-proyecto3.md sección 4)"
+        )
+    for seed_field, frozen_value in FROZEN_SEEDS.items():
+        if getattr(validated_config, seed_field) != frozen_value:
+            raise TrainingJobRejected(
+                f"{seed_field} está congelada en {frozen_value} "
+                "(docs/decisiones-proyecto3.md sección 6)"
+            )
+
     if run_kind not in ("smoke", "campaign"):
         raise TrainingJobRejected(
             f"run_kind debe ser 'smoke' o 'campaign', se recibió {run_kind!r}"
@@ -59,6 +78,22 @@ def validate_new_training_job(
         raise TrainingJobRejected("grid_row debe estar vacío para run_kind 'smoke'")
     if run_kind == "campaign" and not (grid_row and GRID_ROW_PATTERN.fullmatch(grid_row)):
         raise TrainingJobRejected(f"grid_row inválido para campaign: {grid_row!r}")
+
+    # Sección 7: una fila de la rejilla tiene un único combo válido de
+    # parámetros -- sin esto, "r05" se podía registrar con cualquier
+    # optimizador/batch/lr y nada lo notaba (r11/r12 quedan sin definir a
+    # propósito, ver training/grid.py, así que no hay nada que validar ahí).
+    if run_kind == "campaign" and grid_row in GRID:
+        expected = GRID[grid_row]
+        mismatches = {
+            field: (getattr(validated_config, field), expected_value)
+            for field, expected_value in expected.items()
+            if getattr(validated_config, field) != expected_value
+        }
+        if mismatches:
+            raise TrainingJobRejected(
+                f"config no coincide con la rejilla de {grid_row!r}: {mismatches}"
+            )
 
     meta_path = reports_dir / "manifests" / dataset_release / "manifest_meta.json"
     if not meta_path.exists():

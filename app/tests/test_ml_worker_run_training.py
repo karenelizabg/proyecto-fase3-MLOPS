@@ -115,6 +115,30 @@ def test_run_training_returns_a_real_run_id_and_reports_every_epoch(mock_dataset
     assert all(max_epochs == 15 for _epoch, max_epochs in epochs_seen)
 
 
+def test_run_training_calls_on_run_started_with_the_real_run_id_before_any_epoch(
+    mock_dataset_env, meta_path
+):
+    """Revisión de Uriel sobre P3-09 ("la corrida queda en RUNNING para
+    siempre"): el worker necesita el run_id apenas existe, no solo al
+    terminar -- esto es lo que se lo entrega."""
+    manifest_path, crops_root = mock_dataset_env
+    job = a_job(config={**VALID_CONFIG, "patience": 0})
+    seen = []
+
+    def on_run_started(run_id):
+        seen.append(run_id)
+
+    run_id = run_training(
+        job,
+        manifest_path=Path(manifest_path),
+        crops_root=Path(crops_root),
+        meta_path=meta_path,
+        on_run_started=on_run_started,
+    )
+
+    assert seen == [run_id]
+
+
 def test_run_training_works_without_an_on_epoch_callback(mock_dataset_env, meta_path):
     manifest_path, crops_root = mock_dataset_env
     job = a_job(config={**VALID_CONFIG, "patience": 0})
@@ -157,3 +181,5 @@ def test_run_training_subprocess_accepts_the_payload_spawn_sends_it(mock_dataset
 
     assert messages[-1]["type"] == "completed"
     assert messages[-1]["mlflow_run_id"]
+    assert messages[0]["type"] == "run_started"
+    assert messages[0]["mlflow_run_id"] == messages[-1]["mlflow_run_id"]

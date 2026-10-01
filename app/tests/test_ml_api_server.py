@@ -14,6 +14,7 @@ from datetime import datetime
 from starlette.testclient import TestClient
 
 from ml_api.contracts import TrainingJob
+from ml_api.repository import TrainingJobNotCancellable
 from ml_api.server import create_app
 from tests._mcp_fixtures import mcp_settings
 from tests._training_job_fixtures import VALID_TRAINING_CONFIG, write_manifest
@@ -25,10 +26,15 @@ def client_for(
     *,
     jobs: list[TrainingJob] | None = None,
     create_job=None,
+    cancel_job=None,
 ) -> TestClient:
     derived_dir = tmp_path / "derived"
     settings = mcp_settings(monkeypatch, tmp_path / "dataset", tmp_path / "reports", derived_dir)
-    return TestClient(create_app(settings, list_jobs=lambda: jobs or [], create_job=create_job))
+    return TestClient(
+        create_app(
+            settings, list_jobs=lambda: jobs or [], create_job=create_job, cancel_job=cancel_job
+        )
+    )
 
 
 def a_job(**overrides) -> TrainingJob:
@@ -136,6 +142,69 @@ def test_create_job_rejects_missing_run_kind_without_creating_a_row(monkeypatch,
     )
 
     assert response.status_code == 400
+    assert recorder.calls == []
+
+
+def test_create_job_rejects_a_non_frozen_patience_without_creating_a_row(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    write_manifest(reports_dir=tmp_path / "reports", derived_dir=tmp_path / "derived")
+
+    response = client.post(
+        "/training/jobs",
+        json={
+            "dataset_release": "v0.1.1",
+            "config": {**VALID_TRAINING_CONFIG, "patience": 5},
+            "run_kind": "smoke",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "congelad" in response.json()["error"]
+    assert recorder.calls == []
+
+
+def test_create_job_rejects_a_non_frozen_seed_without_creating_a_row(monkeypatch, tmp_path):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    write_manifest(reports_dir=tmp_path / "reports", derived_dir=tmp_path / "derived")
+
+    response = client.post(
+        "/training/jobs",
+        json={
+            "dataset_release": "v0.1.1",
+            "config": {**VALID_TRAINING_CONFIG, "seed_aug": 99},
+            "run_kind": "smoke",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "congelad" in response.json()["error"]
+    assert recorder.calls == []
+
+
+def test_create_job_rejects_campaign_with_config_that_does_not_match_the_grid_row(
+    monkeypatch, tmp_path
+):
+    recorder = _RecordingCreateJob()
+    client = client_for(monkeypatch, tmp_path, create_job=recorder)
+    write_manifest(
+        reports_dir=tmp_path / "reports", derived_dir=tmp_path / "derived", quality_status="warning"
+    )
+
+    response = client.post(
+        "/training/jobs",
+        json={
+            "dataset_release": "v0.1.1",
+            # r01 real es batch_size=32; esto manda 16 -- no coincide con la fila.
+            "config": {**VALID_TRAINING_CONFIG, "batch_size": 16},
+            "run_kind": "campaign",
+            "grid_row": "r01",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "no coincide con la rejilla" in response.json()["error"]
     assert recorder.calls == []
 
 
@@ -259,3 +328,39 @@ def test_create_job_rejects_a_non_object_body(monkeypatch, tmp_path):
 
     assert response.status_code == 400
     assert recorder.calls == []
+
+
+def test_cancel_job_returns_the_updated_job(monkeypatch, tmp_path):
+    calls = []
+
+    def cancel_job(job_id):
+        calls.append(job_id)
+        return a_job(id=job_id, status="cancelled")
+
+    client = client_for(monkeypatch, tmp_path, cancel_job=cancel_job)
+
+    response = client.post("/training/jobs/r01/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert calls == ["r01"]
+
+
+def test_cancel_job_is_404_when_it_does_not_exist(monkeypatch, tmp_path):
+    client = client_for(monkeypatch, tmp_path, cancel_job=lambda job_id: None)
+
+    response = client.post("/training/jobs/ghost/cancel")
+
+    assert response.status_code == 404
+
+
+def test_cancel_job_is_409_when_it_already_finished(monkeypatch, tmp_path):
+    def cancel_job(job_id):
+        raise TrainingJobNotCancellable("completed")
+
+    client = client_for(monkeypatch, tmp_path, cancel_job=cancel_job)
+
+    response = client.post("/training/jobs/r01/cancel")
+
+    assert response.status_code == 409
+    assert "completed" in response.json()["error"]

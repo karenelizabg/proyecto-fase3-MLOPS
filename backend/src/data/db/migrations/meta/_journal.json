@@ -36,6 +36,13 @@
       "when": 1790843360270,
       "tag": "0004_aromatic_network",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1790871996535,
+      "tag": "0005_faulty_speed_demon",
+      "breakpoints": true
     }
   ]
 }

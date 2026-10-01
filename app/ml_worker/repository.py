@@ -112,15 +112,70 @@ def mark_failed(engine: Engine, job_id: str, *, error: str) -> None:
         )
 
 
-def reclaim_stale_jobs(engine: Engine, *, stale_after_seconds: int) -> int:
+def mark_cancelled(engine: Engine, job_id: str) -> None:
+    """Revisión de Uriel sobre P3-09: `process_one_job` llega aquí cuando ve
+    `cancel_requested_at` puesto, mata el subproceso y cierra el run de
+    MLflow como `KILLED` (ver `ml_worker.__main__._close_mlflow_run`)."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE `training_jobs` SET `status` = 'cancelled', `heartbeat_at` = :now "
+                "WHERE `id` = :id"
+            ),
+            {"now": datetime.now(UTC).replace(tzinfo=None), "id": job_id},
+        )
+
+
+def is_cancel_requested(engine: Engine, job_id: str) -> bool:
+    with engine.connect() as connection:
+        value = connection.execute(
+            text("SELECT `cancel_requested_at` FROM `training_jobs` WHERE `id` = :id"),
+            {"id": job_id},
+        ).scalar_one_or_none()
+    return value is not None
+
+
+def set_mlflow_run_id(engine: Engine, job_id: str, mlflow_run_id: str) -> None:
+    """Guarda el `mlflow_run_id` en cuanto arranca el run, no solo al terminar
+    (revisión de Uriel sobre P3-09, punto "corrida queda en RUNNING para
+    siempre"): sin esto, un trabajo que muere a medio entrenar nunca tiene
+    `mlflow_run_id` en la base, y nadie puede cerrar ese run huérfano."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE `training_jobs` "
+                "SET `mlflow_run_id` = :mlflow_run_id, `heartbeat_at` = :now "
+                "WHERE `id` = :id"
+            ),
+            {
+                "mlflow_run_id": mlflow_run_id,
+                "now": datetime.now(UTC).replace(tzinfo=None),
+                "id": job_id,
+            },
+        )
+
+
+def reclaim_stale_jobs(engine: Engine, *, stale_after_seconds: int) -> list[str]:
     """Marca `failed` los trabajos en `running` cuyo heartbeat lleva mudo demasiado.
 
     Cubre al worker que muere a medio entrenamiento (el proceso se cae, el
     trabajo se queda en `running` para siempre si nadie lo detecta). Se
     corre al inicio de cada vuelta del bucle, antes de reclamar uno nuevo.
+    Devuelve los `mlflow_run_id` reclamados (sin los `None`) para que
+    `ml_worker.__main__.main` cierre esos runs huérfanos en MLflow también
+    -- marcar `failed` aquí no le avisa nada a MLflow, son sistemas aparte.
     """
     with engine.begin() as connection:
-        result = connection.execute(
+        threshold = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=stale_after_seconds)
+        stale_runs = connection.execute(
+            text(
+                "SELECT `mlflow_run_id` FROM `training_jobs` "
+                "WHERE `status` = 'running' AND `heartbeat_at` < :threshold"
+            ),
+            {"threshold": threshold},
+        ).scalars()
+        run_ids = [run_id for run_id in stale_runs if run_id is not None]
+        connection.execute(
             text(
                 "UPDATE `training_jobs` "
                 "SET `status` = 'failed', "
@@ -128,9 +183,6 @@ def reclaim_stale_jobs(engine: Engine, *, stale_after_seconds: int) -> int:
                 "WHERE `status` = 'running' "
                 "AND `heartbeat_at` < :threshold"
             ),
-            {
-                "threshold": datetime.now(UTC).replace(tzinfo=None)
-                - timedelta(seconds=stale_after_seconds)
-            },
+            {"threshold": threshold},
         )
-        return result.rowcount
+        return run_ids

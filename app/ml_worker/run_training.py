@@ -39,7 +39,10 @@ def manifest_meta_path(reports_dir: Path, dataset_release: str) -> Path:
 def _build_optimizer(config: TrainingConfig, model: nn.Module) -> torch.optim.Optimizer:
     if config.optimizer == "adam":
         return torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    return torch.optim.SGD(model.parameters(), lr=config.learning_rate)
+    # Sección 7 de docs/decisiones-proyecto3.md: "SGD usa momentum = 0.9".
+    # Sin esto, MLflow registra momentum=0 (el default de torch) -- encontrado
+    # real en la corrida r05 (revisión de Uriel sobre este mismo PR).
+    return torch.optim.SGD(model.parameters(), lr=config.learning_rate, momentum=0.9)
 
 
 def run_training(
@@ -49,6 +52,7 @@ def run_training(
     crops_root: Path,
     meta_path: Path,
     on_epoch=None,
+    on_run_started=None,
 ) -> str:
     """Corre el entrenamiento completo de `job`; devuelve el `mlflow_run_id`.
 
@@ -60,6 +64,9 @@ def run_training(
     os.environ["MANIFEST_META_PATH"] = str(meta_path)
     config = TrainingConfig.model_validate(job.config)
     device = torch.device("cpu")
+    # Presupuesto de cómputo de la sección 7: la campaña corre en un Mac de
+    # 4 CPU / 8 GB -- sin este límite, torch usa todos los cores que vea.
+    torch.set_num_threads(4)
 
     set_reproducibility(
         seed_model=config.seed_model, seed_train=config.seed_train, seed_split=config.seed_split
@@ -68,6 +75,10 @@ def run_training(
     optimizer = _build_optimizer(config, model)
     criterion = nn.CrossEntropyLoss()
 
+    # Sección 7: num_workers = 2. Corre dentro del multiprocessing.Process que
+    # ya lanza ml_worker.__main__ -- multiprocessing anidado, probado real
+    # (fork en Linux, que es el SO del contenedor) para confirmar que no
+    # cuelga ni tranca el reporte de progreso por época.
     train_loader = create_dataloader(
         str(manifest_path),
         str(crops_root),
@@ -76,7 +87,7 @@ def run_training(
         image_size=config.image_size,
         seed_train=config.seed_train,
         seed_aug=config.seed_aug,
-        num_workers=0,
+        num_workers=2,
     )
     val_loader = create_dataloader(
         str(manifest_path),
@@ -86,7 +97,7 @@ def run_training(
         image_size=config.image_size,
         seed_train=config.seed_train,
         seed_aug=config.seed_aug,
-        num_workers=0,
+        num_workers=2,
     )
 
     return train_with_mlflow(
@@ -99,6 +110,7 @@ def run_training(
         device,
         tags={"run_kind": job.run_kind, "grid_row": job.grid_row or ""},
         on_epoch=on_epoch,
+        on_run_started=on_run_started,
     )
 
 
@@ -116,6 +128,9 @@ def run_training_subprocess(
     dict corriente cruza sin depender de que Pydantic sea picklable ahí.
     """
     job = TrainingJob(**job_payload)
+
+    def on_run_started(run_id):
+        queue.put({"type": "run_started", "mlflow_run_id": run_id})
 
     def on_epoch(epoch, max_epochs, train_loss, val_loss, val_accuracy):
         queue.put(
@@ -136,6 +151,7 @@ def run_training_subprocess(
             crops_root=Path(crops_root),
             meta_path=Path(meta_path),
             on_epoch=on_epoch,
+            on_run_started=on_run_started,
         )
     except Exception as error:  # el padre lo guarda en `training_jobs.error`, legible
         queue.put({"type": "failed", "error": str(error)})

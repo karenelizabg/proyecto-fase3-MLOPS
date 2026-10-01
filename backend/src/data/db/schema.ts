@@ -284,6 +284,12 @@ export const trainingJobs = mysqlTable(
     // corrida sin heartbeat reciente y status='running' se considera colgada.
     heartbeatAt: timestamp('heartbeat_at'),
 
+    // P3-09 (revisión de Uriel): ml-api pone esta marca cuando alguien pide
+    // cancelar; trainer-worker la revisa entre mensajes de progreso (no hay
+    // forma de interrumpirlo al instante) y, al verla, mata el subproceso y
+    // deja el job en 'cancelled'. Null mientras nadie la pidió.
+    cancelRequestedAt: timestamp('cancel_requested_at'),
+
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
   },

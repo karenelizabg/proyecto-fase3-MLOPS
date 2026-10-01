@@ -76,12 +76,26 @@ def compute_sha256(filepath):
 
 
 def train_with_mlflow(
-    config, model, train_loader, val_loader, optimizer, criterion, device, tags=None, on_epoch=None
+    config,
+    model,
+    train_loader,
+    val_loader,
+    optimizer,
+    criterion,
+    device,
+    tags=None,
+    on_epoch=None,
+    on_run_started=None,
 ):
     """`on_epoch(epoch, max_epochs, train_loss, val_loss, val_accuracy)` opcional (P3-09):
     lo llama trainer-worker al final de cada época para ir guardando progreso/heartbeat
     en `training_jobs` mientras la corrida sigue viva, sin que esta función sepa nada
-    de esa tabla ni de cómo se reporta -- solo avisa que una época terminó."""
+    de esa tabla ni de cómo se reporta -- solo avisa que una época terminó.
+
+    `on_run_started(run_id)` opcional (revisión de Uriel sobre P3-09): avisa el
+    `mlflow_run_id` en cuanto el run existe, no solo al terminar -- si el
+    worker muere a medio entrenar, sin esto `training_jobs.mlflow_run_id`
+    nunca se llena, y nadie puede cerrar ese run huérfano en MLflow."""
     tags = tags.copy() if tags else {}
 
     run_kind = tags.get("run_kind", "")
@@ -126,6 +140,9 @@ def train_with_mlflow(
         torch.manual_seed(config.seed_aug)
 
     with mlflow.start_run() as run:
+        if on_run_started is not None:
+            on_run_started(run.info.run_id)
+
         mlflow.log_params(config.model_dump())
         if isinstance(optimizer, torch.optim.SGD):
             mlflow.log_param("momentum", optimizer.param_groups[0].get("momentum", 0.0))

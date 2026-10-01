@@ -61,7 +61,26 @@ function response(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status });
 }
 
-function serve() {
+function aRunningJob(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "running-job",
+    status: "running",
+    progress: 0.4,
+    config: {},
+    dataset_release: "v0.1.1",
+    manifest_id: "v0.1.1-abc123",
+    run_kind: "smoke",
+    grid_row: null,
+    mlflow_run_id: null,
+    error: null,
+    logs: [],
+    heartbeat_at: null,
+    ...overrides,
+  };
+}
+
+function serve(initialJobs: Array<Record<string, unknown>> = []) {
+  const jobs = [...initialJobs];
   const fetcher = vi.fn((url: string, init?: RequestInit) => {
     if (url === "/reports/versions.json") return Promise.resolve(response(versions));
     if (url === "/reports/releases/v0.1.1/quality.json")
@@ -91,7 +110,14 @@ function serve() {
         })
       );
     }
-    if (url === "/ml-api/training/jobs") return Promise.resolve(response({ jobs: [] }));
+    const cancelMatch = url.match(/^\/ml-api\/training\/jobs\/([^/]+)\/cancel$/);
+    if (cancelMatch && init?.method === "POST") {
+      const job = jobs.find((candidate) => candidate.id === cancelMatch[1]);
+      if (!job) return Promise.resolve(response({ error: "no existe" }, 404));
+      job.status = "cancelled";
+      return Promise.resolve(response(job));
+    }
+    if (url === "/ml-api/training/jobs") return Promise.resolve(response({ jobs }));
     return Promise.resolve(response(null, 404));
   });
   vi.stubGlobal("fetch", fetcher);
@@ -146,4 +172,55 @@ it("con un valor válido sí llama a la API y refresca la lista", async () => {
     expect(fetcher.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
   expect(await screen.findByText("Sin corridas todavía.")).toBeInTheDocument();
+});
+
+it("elegir una fila de campaign autocompleta y bloquea los 7 parámetros de la rejilla", async () => {
+  serve();
+  render(<TrainingPage />);
+  await selectRelease("v0.1.1");
+
+  fireEvent.change(await screen.findByLabelText("Tipo de corrida"), {
+    target: { value: "campaign" },
+  });
+  fireEvent.change(await screen.findByLabelText("Fila de la rejilla (r01–r12)"), {
+    target: { value: "r05" },
+  });
+
+  // r05 de la rejilla: sgd, batch 32, 30 épocas, lr 1e-2, imagen 128, 1 capa, dropout 0.0.
+  const optimizer = await screen.findByLabelText<HTMLSelectElement>("Optimizador");
+  await waitFor(() => expect(optimizer.value).toBe("sgd"));
+  expect(optimizer).toBeDisabled();
+  expect(screen.getByLabelText<HTMLSelectElement>("Batch size").value).toBe("32");
+  expect(screen.getByLabelText<HTMLInputElement>("Learning rate").value).toBe("0.01");
+  expect(screen.getByLabelText("Batch size")).toBeDisabled();
+
+  // Sección 4/6: siempre bloqueados, sin importar run_kind.
+  expect(screen.getByLabelText("Patience (congelado)")).toBeDisabled();
+  expect(screen.getByLabelText("Semilla (split, congelada)")).toBeDisabled();
+});
+
+it("cancelar una corrida en ejecución llama al endpoint de cancel y refresca la lista", async () => {
+  const fetcher = serve([aRunningJob()]);
+  render(<TrainingPage />);
+
+  const cancelButton = await screen.findByRole("button", { name: "Cancelar" });
+  fireEvent.click(cancelButton);
+
+  await waitFor(() => {
+    expect(
+      fetcher.mock.calls.some(
+        ([url, init]) =>
+          url === "/ml-api/training/jobs/running-job/cancel" && init?.method === "POST"
+      )
+    ).toBe(true);
+  });
+  expect(await screen.findAllByText("cancelled")).not.toHaveLength(0);
+});
+
+it("una corrida ya terminada no muestra botón de cancelar", async () => {
+  serve([aRunningJob({ id: "done-job", status: "completed", progress: 1 })]);
+  render(<TrainingPage />);
+
+  await screen.findByText("done-job");
+  expect(screen.queryByRole("button", { name: "Cancelar" })).not.toBeInTheDocument();
 });

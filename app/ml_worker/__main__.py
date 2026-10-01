@@ -22,9 +22,12 @@ from sqlalchemy import Engine, text
 from ml_api.contracts import TrainingJob
 from ml_worker.repository import (
     claim_next_queued_job,
+    is_cancel_requested,
+    mark_cancelled,
     mark_completed,
     mark_failed,
     reclaim_stale_jobs,
+    set_mlflow_run_id,
     update_progress,
 )
 from ml_worker.run_training import dataset_paths, manifest_meta_path, run_training_subprocess
@@ -40,8 +43,33 @@ QUEUE_POLL_TIMEOUT_SECONDS = 2.0
 # más que esto con un dataset grande -- se documenta como simplificación
 # conocida del worker único de hoy, no un límite pensado para varios workers.
 HEARTBEAT_STALE_SECONDS = 600
+# Cuánto espera `process.terminate()` (SIGTERM) a que el subproceso cierre
+# solo (le da tiempo a que el `with mlflow.start_run()` de train_with_mlflow
+# reaccione a la excepción y cierre el run) antes de forzar `process.kill()`.
+CANCEL_GRACE_SECONDS = 5.0
 
 SpawnFn = Callable[[TrainingJob, Path, Path, Path], tuple[Any, Any]]
+IsCancelRequestedFn = Callable[[Engine, str], bool]
+CloseMlflowRunFn = Callable[[str, str], None]
+
+
+def _close_mlflow_run(run_id: str, status: str) -> None:
+    """Cierra un run de MLflow desde fuera del proceso que lo abrió.
+
+    Revisión de Uriel sobre P3-09: si el subproceso que entrena muere sin
+    terminar su `with mlflow.start_run()` (lo mata una cancelación, o lo
+    mata el sistema operativo), el run queda `RUNNING` en MLflow para
+    siempre -- nadie más lo cierra. `MlflowClient.set_terminated` es la
+    forma de cerrarlo desde el proceso padre, que sí sigue vivo.
+    """
+    from mlflow.tracking import MlflowClient
+
+    try:
+        MlflowClient().set_terminated(run_id, status=status)
+    except Exception:  # el run ya pudo haberse cerrado solo -- no tumbar al worker por esto
+        logger.warning(
+            "No se pudo cerrar el run de MLflow %s como %s.", run_id, status, exc_info=True
+        )
 
 
 def _spawn_training_process(
@@ -67,15 +95,34 @@ def process_one_job(
     derived_dir: Path,
     reports_dir: Path,
     spawn: SpawnFn = _spawn_training_process,
+    is_cancel_requested: IsCancelRequestedFn = is_cancel_requested,
+    close_mlflow_run: CloseMlflowRunFn = _close_mlflow_run,
 ) -> None:
-    """Corre `job` hasta terminar (completed/failed) y deja la base al día."""
+    """Corre `job` hasta terminar (completed/failed/cancelled) y deja la base al día."""
     manifest_path, crops_root = dataset_paths(derived_dir, job.dataset_release)
     meta_path = manifest_meta_path(reports_dir, job.dataset_release)
     process, queue = spawn(job, manifest_path, crops_root, meta_path)
 
+    mlflow_run_id: str | None = None
     finished = False
     try:
         while True:
+            # No hay forma de interrumpir el subproceso al instante (revisión de
+            # Uriel sobre P3-09, "no hay forma de cancelar"): se revisa la marca
+            # entre mensajes, cada QUEUE_POLL_TIMEOUT_SECONDS como mucho.
+            if is_cancel_requested(engine, job.id):
+                process.terminate()
+                process.join(timeout=CANCEL_GRACE_SECONDS)
+                if process.is_alive():
+                    process.kill()
+                    process.join()
+                if mlflow_run_id is not None:
+                    close_mlflow_run(mlflow_run_id, "KILLED")
+                mark_cancelled(engine, job.id)
+                logger.info("%s: cancelado a pedido.", job.id)
+                finished = True
+                break
+
             try:
                 message = queue.get(timeout=QUEUE_POLL_TIMEOUT_SECONDS)
             except Empty:
@@ -83,7 +130,13 @@ def process_one_job(
                     break
                 continue
 
-            if message["type"] == "progress":
+            if message["type"] == "run_started":
+                # Guardarlo apenas existe, no solo al terminar (revisión de Uriel:
+                # "la corrida queda en RUNNING en MLflow para siempre") -- si el
+                # proceso muere después de esto, ya sabemos qué run cerrar.
+                mlflow_run_id = message["mlflow_run_id"]
+                set_mlflow_run_id(engine, job.id, mlflow_run_id=mlflow_run_id)
+            elif message["type"] == "progress":
                 update_progress(
                     engine, job.id, progress=message["progress"], log_line=message["log_line"]
                 )
@@ -94,6 +147,9 @@ def process_one_job(
                 finished = True
                 break
             else:  # "failed"
+                # El propio `with mlflow.start_run()` (training/tracking.py) ya
+                # cierra el run como FAILED cuando la excepción se propaga ahí
+                # dentro -- no hace falta cerrarlo otra vez aquí.
                 mark_failed(engine, job.id, error=message["error"])
                 logger.warning("%s: falló (%s).", job.id, message["error"])
                 finished = True
@@ -104,9 +160,14 @@ def process_one_job(
     if not finished:
         # El subproceso terminó (se cayó, lo mataron) sin mandar un mensaje
         # final -- el padre no se queda esperando para siempre, lo cierra él.
+        # A diferencia del caso "failed" de arriba, aquí el `with
+        # mlflow.start_run()` nunca llegó a reaccionar (lo mataron de golpe),
+        # así que el run sigue RUNNING en MLflow hasta que lo cerremos nosotros.
         error = f"el proceso de entrenamiento terminó inesperadamente (código {process.exitcode})"
         mark_failed(engine, job.id, error=error)
         logger.error("%s: %s", job.id, error)
+        if mlflow_run_id is not None:
+            close_mlflow_run(mlflow_run_id, "FAILED")
 
 
 def _wait_for_dependencies(retries: int = 10, delay_seconds: float = 3.0) -> None:
@@ -139,7 +200,11 @@ def main() -> None:
     while True:
         reclaimed = reclaim_stale_jobs(engine, stale_after_seconds=HEARTBEAT_STALE_SECONDS)
         if reclaimed:
-            logger.warning("%s trabajo(s) con heartbeat vencido marcados como failed.", reclaimed)
+            logger.warning(
+                "%s trabajo(s) con heartbeat vencido marcados como failed.", len(reclaimed)
+            )
+            for mlflow_run_id in reclaimed:
+                _close_mlflow_run(mlflow_run_id, "FAILED")
 
         job = claim_next_queued_job(engine)
         if job is None:

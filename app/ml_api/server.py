@@ -20,7 +20,12 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from ml_api.contracts import PendingEndpoint, TrainingJob, TrainingJobList
-from ml_api.repository import create_training_job, list_training_jobs
+from ml_api.repository import (
+    TrainingJobNotCancellable,
+    create_training_job,
+    list_training_jobs,
+    request_training_job_cancellation,
+)
 from ml_api.training_jobs import TrainingJobRejected, validate_new_training_job
 from storage.db import get_engine
 from storage.settings import Settings
@@ -29,6 +34,7 @@ logger = logging.getLogger("ml-api")
 
 ListJobs = Callable[[], list[TrainingJob]]
 CreateJob = Callable[[str, str, dict, str, str | None], TrainingJob]
+CancelJob = Callable[[str], TrainingJob | None]
 
 _PENDING = {
     "experiments": PendingEndpoint(
@@ -51,6 +57,7 @@ def create_app(
     *,
     list_jobs: ListJobs | None = None,
     create_job: CreateJob | None = None,
+    cancel_job: CancelJob | None = None,
 ) -> Starlette:
     settings = settings if settings is not None else Settings()
     list_jobs = list_jobs or (lambda: list_training_jobs(get_engine()))
@@ -63,6 +70,9 @@ def create_app(
             run_kind=run_kind,
             grid_row=grid_row,
         )
+    )
+    cancel_job = cancel_job or (
+        lambda job_id: request_training_job_cancellation(get_engine(), job_id)
     )
 
     def health(_: Request) -> JSONResponse:
@@ -108,6 +118,18 @@ def create_app(
         )
         return JSONResponse(job.model_dump(mode="json"), status_code=201)
 
+    async def cancel_training_job_route(request: Request) -> JSONResponse:
+        job_id = request.path_params["job_id"]
+        try:
+            job = cancel_job(job_id)
+        except TrainingJobNotCancellable as error:
+            return JSONResponse(
+                {"error": f"no se puede cancelar: ya está {error}"}, status_code=409
+            )
+        if job is None:
+            return JSONResponse({"error": "no existe ese training_job"}, status_code=404)
+        return JSONResponse(job.model_dump(mode="json"))
+
     def pending(name: str):
         async def handler(_: Request) -> JSONResponse:
             return JSONResponse(_PENDING[name].model_dump(mode="json"))
@@ -119,6 +141,7 @@ def create_app(
             Route("/health", health, methods=["GET"]),
             Route("/training/jobs", training_jobs, methods=["GET"]),
             Route("/training/jobs", create_training_job_route, methods=["POST"]),
+            Route("/training/jobs/{job_id}/cancel", cancel_training_job_route, methods=["POST"]),
             Route("/experiments", pending("experiments"), methods=["GET"]),
             Route("/evaluation", pending("evaluation"), methods=["GET"]),
             Route("/models", pending("models"), methods=["GET"]),

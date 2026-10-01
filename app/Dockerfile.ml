@@ -8,12 +8,19 @@ FROM python:3.12-slim
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.13 /uv /usr/local/bin/uv
 
-# P3-08: `training.tracking.get_git_info()` corre `git rev-parse HEAD` para
-# registrar el commit real de cada corrida (contrato de MLflow, sección 8);
-# docker-compose.yml monta `.git` de solo lectura en trainer-worker para que
-# tenga algo real que inspeccionar.
-RUN apt-get update && apt-get install --no-install-recommends -y git \
-    && rm -rf /var/lib/apt/lists/*
+# P3-08: `training.tracking.get_git_info()` registra el commit real de cada
+# corrida (contrato de MLflow, sección 8). Se hornea en el build, no se lee
+# del host en vivo -- revisión de Uriel sobre este PR: el código que entrena
+# es el que se copió a la imagen (los COPY de abajo), así que el commit que
+# cuenta es el de ESE momento, no el que esté en el checkout del host cuando
+# arranca el contenedor (si alguien cambia de rama sin reconstruir, MLflow
+# registraría un commit que no es el que de verdad corrió). `docker-compose.yml`
+# pasa estos ARG calculados por el host al invocar `docker compose build`;
+# `get_git_info()` (P3-08) ya prioriza estas variables sobre `git` en vivo.
+ARG GIT_COMMIT=unknown
+ARG GIT_DIRTY=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
+ENV GIT_DIRTY=${GIT_DIRTY}
 
 WORKDIR /app
 

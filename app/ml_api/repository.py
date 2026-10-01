@@ -9,10 +9,16 @@ columna futura corre el mismo riesgo, y un SQL crudo no se defiende solo.
 import json
 import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from sqlalchemy import Engine, text
 
 from ml_api.contracts import TrainingJob
+
+
+class TrainingJobNotCancellable(Exception):
+    """El job existe pero ya terminó (`completed`/`failed`/`cancelled`)."""
+
 
 SELECT_COLUMNS = """
     `id`, `status`, `progress`, `config`, `dataset_release`, `manifest_id`,
@@ -111,3 +117,42 @@ def create_training_job(
             },
         )
     return job
+
+
+def request_training_job_cancellation(engine: Engine, job_id: str) -> TrainingJob | None:
+    """Pide cancelar `job_id`; `None` si no existe (revisión de Uriel sobre P3-09).
+
+    `queued` se cancela directo -- nadie lo reclamó todavía, no hay subproceso
+    que avisar. `running` solo deja una marca (`cancel_requested_at`):
+    trainer-worker la revisa entre mensajes de progreso (no hay forma de
+    interrumpirlo al instante, ver `ml_worker.__main__.process_one_job`) y es
+    quien de verdad mata el subproceso y cierra el run de MLflow. Terminal
+    (`completed`/`failed`/`cancelled`) levanta `TrainingJobNotCancellable`.
+    """
+    with engine.begin() as connection:
+        row = connection.execute(
+            text(f"SELECT {SELECT_COLUMNS} FROM `training_jobs` WHERE `id` = :id FOR UPDATE"),
+            {"id": job_id},
+        ).fetchone()
+        if row is None:
+            return None
+        job = row_to_job(row)
+        if job.status == "queued":
+            connection.execute(
+                text("UPDATE `training_jobs` SET `status` = 'cancelled' WHERE `id` = :id"),
+                {"id": job_id},
+            )
+        elif job.status == "running":
+            connection.execute(
+                text(
+                    "UPDATE `training_jobs` SET `cancel_requested_at` = :now "
+                    "WHERE `id` = :id AND `cancel_requested_at` IS NULL"
+                ),
+                {"now": datetime.now(UTC).replace(tzinfo=None), "id": job_id},
+            )
+        else:
+            raise TrainingJobNotCancellable(job.status)
+        row = connection.execute(
+            text(f"SELECT {SELECT_COLUMNS} FROM `training_jobs` WHERE `id` = :id"), {"id": job_id}
+        ).fetchone()
+    return row_to_job(row)
