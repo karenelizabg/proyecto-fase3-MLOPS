@@ -2,7 +2,6 @@ import math
 
 import torch
 import torch.nn as nn
-
 from training.config import TrainingConfig
 from training.data import ManifestDataset, create_dataloader
 from training.model import build_model

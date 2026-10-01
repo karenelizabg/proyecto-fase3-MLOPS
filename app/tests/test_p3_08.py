@@ -1,11 +1,16 @@
+import subprocess
+
 import mlflow
+import pandas as pd
+import pytest
 import torch
 import torch.nn as nn
-
+from mlflow.artifacts import download_artifacts
+from mlflow.tracking import MlflowClient
 from training.config import TrainingConfig
 from training.data import create_dataloader
 from training.model import build_model
-from training.tracking import train_with_mlflow
+from training.tracking import compute_sha256, train_with_mlflow
 from training.trainer import EarlyStopping
 
 
@@ -43,10 +48,9 @@ def test_seed_aug_workers_effect(mock_dataset_env):
 
 
 def test_early_stopping_controlled_sequence():
-    early_stopping = EarlyStopping(patience=3, min_delta=0.01)
+    early_stopping = EarlyStopping(patience=3, min_delta=0.001)
 
     model = nn.Linear(10, 2)
-
     val_losses = [0.90, 0.70, 0.60, 0.5995, 0.62, 0.61]
     saved_weights_at_epoch_3 = None
 
@@ -56,7 +60,7 @@ def test_early_stopping_controlled_sequence():
         if epoch == 3:
             saved_weights_at_epoch_3 = {k: v.clone() for k, v in model.state_dict().items()}
 
-        early_stopping(loss, model, epoch)
+        early_stopping(loss, 0.9, 0.9, model, epoch)
 
         if early_stopping.early_stop:
             assert epoch == 6, f"Se detuvo prematuramente en la época {epoch}"
@@ -72,11 +76,190 @@ def test_early_stopping_controlled_sequence():
         )
 
 
-def test_mlflow_contract(mock_dataset_env, tmp_path):
+def test_mlflow_contract(mock_dataset_env, tmp_path, monkeypatch):
     manifest_path, base_dir = mock_dataset_env
     device = torch.device("cpu")
 
-    mlflow.set_tracking_uri(f"sqlite:///{tmp_path}/mlflow.db")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
+    monkeypatch.setenv("MANIFEST_META_PATH", str(tmp_path / "manifest_meta.json"))
+    monkeypatch.setenv("GIT_COMMIT", "mockcommit123")
+    monkeypatch.setenv("GIT_DIRTY", "false")
+
+    config = TrainingConfig(
+        optimizer="sgd",
+        batch_size=16,
+        max_epochs=15,
+        learning_rate=0.001,
+        image_size=128,
+        hidden_layers=0,
+        dropout=0.0,
+        seed_split=42,
+        seed_train=43,
+        seed_aug=44,
+        seed_model=45,
+        patience=2,
+        min_delta=0.01,
+    )
+
+    model = build_model(config).to(device)
+    optimizer = torch.optim.SGD(model.parameters(), lr=config.learning_rate, momentum=0.9)
+    criterion = nn.CrossEntropyLoss()
+
+    loader_args = {
+        "manifest_path": manifest_path,
+        "base_dir": base_dir,
+        "batch_size": 2,
+        "image_size": config.image_size,
+        "seed_train": config.seed_train,
+        "num_workers": 0,
+    }
+    train_loader = create_dataloader(split="train", **loader_args)
+    val_loader = create_dataloader(split="val", **loader_args)
+
+    mock_tags = {"run_kind": "smoke", "grid_row": ""}
+    run_id = train_with_mlflow(
+        config, model, train_loader, val_loader, optimizer, criterion, device, tags=mock_tags
+    )
+
+    run = mlflow.get_run(run_id)
+    tags = run.data.tags
+    metrics = run.data.metrics
+    params = run.data.params
+
+    assert "optimizer" in params
+    assert params["optimizer"] == "sgd"
+    assert "momentum" in params and params["momentum"] == "0.9"
+    assert "seed_aug" in params
+
+    assert tags["release"] == "v0.1.1"
+    assert tags["manifest_id"] == "m_123"
+    assert tags["git_commit"] == "mockcommit123"
+    assert tags["git_dirty"] == "false"
+    assert "python_version" in tags
+    assert "torch_version" in tags
+    assert "torchvision_version" in tags
+    assert "platform" in tags
+    assert tags["device"] == "cpu"
+
+    assert "best_val_loss" in metrics
+    assert "best_val_accuracy" in metrics
+    assert "best_val_macro_f1" in metrics
+    assert "duration_s" in metrics
+    assert "best_epoch" in metrics
+    assert "stopped_epoch" in metrics
+    assert not any(k.startswith("test_") for k in metrics)
+
+    client = MlflowClient()
+    for m in ["train_loss", "train_accuracy", "val_loss", "val_accuracy", "val_macro_f1"]:
+        history = client.get_metric_history(run_id, m)
+        assert len(history) == int(metrics["stopped_epoch"])
+        assert history[0].step == 1
+
+    curves_path = download_artifacts(
+        run_id=run_id, artifact_path="curves.csv", dst_path=str(tmp_path)
+    )
+    df = pd.read_csv(curves_path)
+    assert len(df) == metrics["stopped_epoch"]
+    assert list(df.columns) == [
+        "train_loss",
+        "train_accuracy",
+        "val_loss",
+        "val_accuracy",
+        "val_macro_f1",
+    ]
+
+    ckpt_path = download_artifacts(
+        run_id=run_id, artifact_path="checkpoint/best.pt", dst_path=str(tmp_path)
+    )
+    assert tags["checkpoint_sha256"] == compute_sha256(ckpt_path)
+
+
+def test_mlflow_fails_without_manifest(mock_dataset_env, tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEST_META_PATH", "ruta_falsa/meta.json")
+    config = TrainingConfig(
+        optimizer="adam",
+        batch_size=16,
+        max_epochs=15,
+        learning_rate=0.001,
+        image_size=128,
+        hidden_layers=0,
+        dropout=0.0,
+        seed_split=42,
+        seed_train=43,
+        seed_aug=44,
+        seed_model=45,
+        patience=2,
+        min_delta=0.01,
+    )
+    with pytest.raises(FileNotFoundError):
+        train_with_mlflow(
+            config, None, None, None, None, None, None, tags={"run_kind": "smoke", "grid_row": ""}
+        )
+
+
+def test_mlflow_fails_without_git(mock_dataset_env, tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEST_META_PATH", str(tmp_path / "manifest_meta.json"))
+    monkeypatch.delenv("GIT_COMMIT", raising=False)
+    monkeypatch.setattr(
+        subprocess,
+        "check_output",
+        lambda *args, **kwargs: (_ for _ in ()).throw(subprocess.CalledProcessError(1, "git")),
+    )
+    config = TrainingConfig(
+        optimizer="adam",
+        batch_size=16,
+        max_epochs=15,
+        learning_rate=0.001,
+        image_size=128,
+        hidden_layers=0,
+        dropout=0.0,
+        seed_split=42,
+        seed_train=43,
+        seed_aug=44,
+        seed_model=45,
+        patience=2,
+        min_delta=0.01,
+    )
+    with pytest.raises(RuntimeError, match="git_commit"):
+        train_with_mlflow(
+            config, None, None, None, None, None, None, tags={"run_kind": "smoke", "grid_row": ""}
+        )
+
+
+def test_mlflow_fails_on_nan_val_loss(mock_dataset_env, tmp_path, monkeypatch):
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
+    monkeypatch.setenv("MANIFEST_META_PATH", str(tmp_path / "manifest_meta.json"))
+    monkeypatch.setenv("GIT_COMMIT", "mock")
+    config = TrainingConfig(
+        optimizer="adam",
+        batch_size=16,
+        max_epochs=15,
+        learning_rate=0.001,
+        image_size=128,
+        hidden_layers=0,
+        dropout=0.0,
+        seed_split=42,
+        seed_train=43,
+        seed_aug=44,
+        seed_model=45,
+        patience=2,
+        min_delta=0.01,
+    )
+
+    import training.tracking
+
+    monkeypatch.setattr(training.tracking, "evaluate_epoch", lambda *args: (float("nan"), 0.0, 0.0))
+    monkeypatch.setattr(training.tracking, "train_epoch", lambda *args: (0.0, 0.0))
+
+    with pytest.raises(RuntimeError, match="checkpoint"):
+        train_with_mlflow(
+            config, None, None, None, None, None, None, tags={"run_kind": "smoke", "grid_row": ""}
+        )
+
+
+def test_mlflow_run_fails_on_exception(mock_dataset_env, tmp_path, monkeypatch):
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path}/mlflow.db")
+    monkeypatch.setenv("MANIFEST_META_PATH", str(tmp_path / "manifest_meta.json"))
 
     config = TrainingConfig(
         optimizer="adam",
@@ -94,37 +277,9 @@ def test_mlflow_contract(mock_dataset_env, tmp_path):
         min_delta=0.01,
     )
 
-    model = build_model(config).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    criterion = nn.CrossEntropyLoss()
+    mock_tags = {"run_kind": "smoke", "grid_row": ""}
+    with pytest.raises(AttributeError):
+        train_with_mlflow(config, None, None, None, None, None, None, tags=mock_tags)
 
-    loader_args = {
-        "manifest_path": manifest_path,
-        "base_dir": base_dir,
-        "batch_size": 2,
-        "image_size": config.image_size,
-        "seed_train": config.seed_train,
-        "num_workers": 0,
-    }
-
-    train_loader = create_dataloader(split="train", **loader_args)
-    val_loader = create_dataloader(split="val", **loader_args)
-
-    run_id = train_with_mlflow(
-        config, model, train_loader, val_loader, optimizer, criterion, device, "Test_Experiment"
-    )
-
-    run = mlflow.get_run(run_id)
-    metrics = run.data.metrics
-    params = run.data.params
-
-    assert "optimizer" in params
-    assert params["max_epochs"] == "15"
-
-    assert "val_macro_f1" in metrics, "Falta registrar val_macro_f1"
-    assert "train_accuracy" in metrics, "Falta registrar train_accuracy"
-    assert "best_epoch" in metrics, "Falta registrar best_epoch"
-    assert "stopped_epoch" in metrics, "Falta registrar stopped_epoch"
-
-    assert metrics["best_epoch"] > 0
-    assert metrics["stopped_epoch"] <= 15
+    last_run = mlflow.search_runs(experiment_names=["clasificador-perro-gato"]).iloc[0]
+    assert last_run["status"] == "FAILED"

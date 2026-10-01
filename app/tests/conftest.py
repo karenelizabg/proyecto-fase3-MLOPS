@@ -25,4 +25,15 @@ def mock_dataset_env(tmp_path):
     manifest_path = tmp_path / "manifest.csv"
     pd.DataFrame(records).to_csv(manifest_path, index=False)
 
+    import json
+
+    meta_data = {
+        "manifest_id": "m_123",
+        "manifest_sha256": "sha_xyz",
+        "classes": {"0": "cat", "1": "dog"},
+        "release": {"name": "v0.1.1"},
+    }
+    with open(tmp_path / "manifest_meta.json", "w") as f:
+        json.dump(meta_data, f)
+
     return str(manifest_path), str(base_dir)
