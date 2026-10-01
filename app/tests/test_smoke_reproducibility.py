@@ -4,8 +4,8 @@ Corre el MISMO camino que el worker real: `ml_worker.run_training.run_training`
 (`set_reproducibility` + `create_dataloader(batch_size=config.batch_size,
 seed_aug=config.seed_aug)` + `train_with_mlflow` con `run_kind=smoke`), no una
 copia de esa lógica. Datos: recortes JPEG pequeños escritos en `tmp_path` con
-un manifiesto real (mismas columnas que `manifest.csv`); MLflow en un file
-store temporal. Nada se escribe en `app/` ni en `mlruns/` del repo.
+un manifiesto real (mismas columnas que `manifest.csv`); MLflow en un store
+temporal (SQLite + artefactos en `tmp_path`). Nada se escribe en `app/` ni en `mlruns/` del repo.
 """
 
 import hashlib
@@ -37,8 +37,8 @@ from training.smoke import (
 
 TOLERANCE = 1e-6
 GIT_COMMIT = "a" * 40  # valor de fixture, no el commit real
-TRAIN_PER_CLASS = 20
-VAL_PER_CLASS = 8
+TRAIN_PER_CLASS = 12
+VAL_PER_CLASS = 4
 
 # r01 de la rejilla con batch_size=16 (distinto de r01 y del 2 que usaba la
 # versión anterior del smoke test) y early stopping corto para acotar el tiempo.
@@ -127,7 +127,9 @@ def smoke(tmp_path_factory):
     """Dos corridas smoke con la misma config y semillas, por el camino del worker."""
     root = tmp_path_factory.mktemp("smoke")
     data = _build_dataset(root)
-    tracking_uri = f"file:{root / 'mlruns'}"
+    # SQLite temporal: MLflow 3.16 deja el file store en modo mantenimiento
+    # (lanza error salvo MLFLOW_ALLOW_FILE_STORE). Los artefactos van a tmp.
+    tracking_uri = f"sqlite:///{root / 'mlflow.db'}"
 
     previous_deterministic = torch.are_deterministic_algorithms_enabled()
     previous_uri = mlflow.get_tracking_uri()
@@ -140,6 +142,10 @@ def smoke(tmp_path_factory):
         patch.setenv("GIT_COMMIT", GIT_COMMIT)
         patch.setenv("GIT_DIRTY", "false")
         mlflow.set_tracking_uri(tracking_uri)
+        # Sin esto el experimento nace con artefactos en ./mlruns (cwd = app/).
+        mlflow.create_experiment(
+            "clasificador-perro-gato", artifact_location=(root / "artifacts").as_uri()
+        )
         try:
             run_ids = [
                 run_training(
