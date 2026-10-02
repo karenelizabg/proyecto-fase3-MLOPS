@@ -1,6 +1,6 @@
 outs:
-- md5: e87d65bae422754cdd69c9455aa3577f.dir
-  size: 76965
-  nfiles: 2
+- md5: 2b5f14192a7e50fe57b84a37d4b8616a.dir
+  size: 541206381
+  nfiles: 25
   hash: md5
   path: mlflow-store
