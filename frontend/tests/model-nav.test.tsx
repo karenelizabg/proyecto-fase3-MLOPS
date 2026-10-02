@@ -69,8 +69,8 @@ describe("SPEC-P3-03-NAV - las 5 rutas de Modelo existen y se alcanzan desde el 
     await screen.findByRole("heading", { name: "Training" });
 
     fireEvent.click(screen.getByRole("link", { name: "Experiments" }));
-    expect(await screen.findByRole("heading", { name: "Experiments" })).toBeInTheDocument();
-    expect(await screen.findByText(/Pendiente/)).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Experimentos de MLflow en vivo/i })).toBeInTheDocument();
+    expect(await screen.findByText(/Experimentos de MLflow en vivo/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("link", { name: "Evaluation" }));
     expect(await screen.findByRole("heading", { name: "Evaluation" })).toBeInTheDocument();
@@ -85,21 +85,21 @@ describe("SPEC-P3-03-NAV - las 5 rutas de Modelo existen y se alcanzan desde el 
     expect(await screen.findByText(/Pendiente/)).toBeInTheDocument();
   });
 
-  it("las 4 páginas pendientes dicen 'Pendiente' aunque ml-api no responda", async () => {
+  it("las páginas pendientes y Experiments renderizan correctamente aunque ml-api no responda", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(() => jsonResponse(null, 404))
     );
     renderAt("/experiments");
 
-    expect(await screen.findByRole("heading", { name: "Experiments" })).toBeInTheDocument();
-    expect(await screen.findByText("Pendiente.")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Experimentos de MLflow en vivo/i })).toBeInTheDocument();
+    expect(await screen.findByText(/Experimentos de MLflow en vivo/i)).toBeInTheDocument();
   });
 
   it("Training se conecta al menú de Training desde Experiments", async () => {
     mockMlApi();
     renderAt("/experiments");
-    await screen.findByRole("heading", { name: "Experiments" });
+    await screen.findByRole("heading", { name: /Experimentos de MLflow en vivo/i });
 
     fireEvent.click(screen.getByRole("link", { name: "Training" }));
 

@@ -15,11 +15,14 @@ from collections.abc import Callable
 
 import uvicorn
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from ml_api.contracts import EvaluationLocked, PendingEndpoint, TrainingJob, TrainingJobList
+from ml_api.experiments import get_metric_history, list_runs, update_run_tag
 from ml_api.repository import (
     TrainingJobNotCancellable,
     create_training_job,
@@ -152,11 +155,25 @@ def create_app(
             Route("/training/jobs", training_jobs, methods=["GET"]),
             Route("/training/jobs", create_training_job_route, methods=["POST"]),
             Route("/training/jobs/{job_id}/cancel", cancel_training_job_route, methods=["POST"]),
-            Route("/experiments", pending("experiments"), methods=["GET"]),
+            Route("/experiments/{experiment_id}/runs", list_runs, methods=["GET"]),
+            Route(
+                "/experiments/runs/{run_id}/metrics/{metric_key}",
+                get_metric_history,
+                methods=["GET"],
+            ),
+            Route("/experiments/runs/{run_id}/tags", update_run_tag, methods=["POST"]),
             Route("/evaluation", evaluation, methods=["GET"]),
             Route("/models", pending("models"), methods=["GET"]),
             Route("/inference", pending("inference"), methods=["GET"]),
-        ]
+        ],
+        middleware=[
+            Middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+        ],
     )
 
 
