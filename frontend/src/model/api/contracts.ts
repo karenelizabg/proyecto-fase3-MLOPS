@@ -95,6 +95,145 @@ export const pendingEndpointSchema = z
   })
   .strict();
 
+// --- P3-15: Evaluation y Models ---------------------------------------------
+
+// P3-11: la selección no está cerrada (o el sello del test no coincide). Mismo
+// contrato que `EvaluationLocked` en app/ml_api/contracts.py.
+export const evaluationLockedSchema = z
+  .object({
+    status: z.literal("selection_not_closed"),
+    ticket: z.literal("P3-11"),
+    message: z.string().min(1),
+  })
+  .strict();
+
+export const evaluationExampleSchema = z
+  .object({
+    crop_id: z.string().min(1),
+    source_image_id: z.string().min(1),
+    true_class: z.string().min(1),
+    predicted_class: z.string().min(1),
+    probability: z.number().finite(),
+  })
+  .strict();
+
+export const evaluationClassMetricsSchema = z
+  .object({
+    precision: z.number().finite(),
+    recall: z.number().finite(),
+    f1: z.number().finite(),
+    support: z.number().int().nonnegative(),
+  })
+  .strict();
+
+// Espejo de `EvaluationReport` en app/ml_api/contracts.py: sello de P3-11 +
+// reportes de P3-13, servidos por GET /ml-api/evaluation.
+export const evaluationReportSchema = z
+  .object({
+    status: z.literal("ready"),
+    run_id: z.string().min(1),
+    release: z.string().min(1),
+    manifest_id: z.string().min(1),
+    manifest_sha256: z.string().min(1),
+    checkpoint_sha256: z.string().min(1),
+    selected_at: z.string().min(1),
+    grid_row: z.string().min(1),
+    best_val_accuracy: z.number().finite(),
+    best_val_macro_f1: z.number().finite(),
+    best_val_loss: z.number().finite(),
+    classes: z.array(z.string().min(1)),
+    accuracy: z.number().finite(),
+    macro_f1: z.number().finite(),
+    confusion_matrix: z.array(z.array(z.number().int().nonnegative())),
+    per_class: z.record(z.string(), evaluationClassMetricsSchema),
+    total: z.number().int().nonnegative(),
+    baseline_majority_accuracy: z.number().finite(),
+    most_confused_class: z.string().min(1),
+    recall_per_class: z.record(z.string(), z.number().finite()),
+    accuracy_hides_low_recall: z.boolean(),
+    successes: z.array(evaluationExampleSchema),
+    errors: z.array(evaluationExampleSchema),
+  })
+  .strict();
+
+export const evaluationResponseSchema = z.discriminatedUnion("status", [
+  evaluationReportSchema,
+  evaluationLockedSchema,
+  pendingEndpointSchema,
+]);
+
+export type EvaluationExample = z.infer<typeof evaluationExampleSchema>;
+export type EvaluationReport = z.infer<typeof evaluationReportSchema>;
+export type EvaluationResponse = z.infer<typeof evaluationResponseSchema>;
+
+// Espejo de los contratos de Models en app/ml_api/contracts.py (P3-15). El
+// catálogo `reports/models/registry.json` lo produce P3-14; la versión del
+// dataset va separada de la del modelo (requisito del #23).
+export const modelS3StatusSchema = z
+  .object({
+    exists: z.boolean(),
+    version_id: z.string().nullable(),
+    size_bytes: z.number().int().nullable(),
+    last_modified: z.string().nullable(),
+  })
+  .strict();
+
+export const modelSummarySchema = z
+  .object({
+    version: z.string().min(1),
+    dataset_version: z.string().min(1),
+    run_id: z.string().min(1),
+    release: z.string().min(1),
+    manifest_id: z.string().min(1),
+    published_at: z.string().min(1),
+    selected: z.boolean(),
+    active: z.boolean(),
+    s3_status: modelS3StatusSchema,
+  })
+  .strict();
+
+export const modelListSchema = z
+  .object({
+    status: z.literal("ready"),
+    model_name: z.string().min(1),
+    active_version: z.string().nullable(),
+    versions: z.array(modelSummarySchema),
+  })
+  .strict();
+
+export const modelListResponseSchema = z.discriminatedUnion("status", [
+  modelListSchema,
+  pendingEndpointSchema,
+]);
+
+export const modelDetailSchema = z
+  .object({
+    status: z.literal("ready"),
+    model_name: z.string().min(1),
+    version: z.string().min(1),
+    dataset_version: z.string().min(1),
+    run_id: z.string().min(1),
+    release: z.string().min(1),
+    manifest_id: z.string().min(1),
+    manifest_sha256: z.string().min(1),
+    checkpoint_sha256: z.string().min(1),
+    package_sha256: z.string().min(1),
+    s3_bucket: z.string().min(1),
+    s3_key: z.string().min(1),
+    s3_version_id: z.string().nullable(),
+    published_at: z.string().min(1),
+    selected: z.boolean(),
+    active: z.boolean(),
+    card: z.string().nullable(),
+    download_url: z.string().nullable(),
+    s3_status: modelS3StatusSchema,
+  })
+  .strict();
+
+export type ModelSummary = z.infer<typeof modelSummarySchema>;
+export type ModelListResponse = z.infer<typeof modelListResponseSchema>;
+export type ModelDetail = z.infer<typeof modelDetailSchema>;
+
 export type TrainingJob = z.infer<typeof trainingJobSchema>;
 export type TrainingJobList = z.infer<typeof trainingJobListSchema>;
 export type PendingEndpoint = z.infer<typeof pendingEndpointSchema>;

@@ -31,8 +31,11 @@ expone: es un servicio Python aparte, no una ruta más del backend existente.
 | `/ml-api/training/jobs` | GET | → `TrainingJobList` | Real (lee `training_jobs`) |
 | `/ml-api/training/jobs` | POST | `CreateTrainingJobRequest` → `TrainingJob` (201) | Real (P3-09) — valida y encola en `queued` |
 | `/ml-api/experiments` | GET | `PendingEndpoint` | Pendiente — P3-12 |
-| `/ml-api/evaluation` | GET | `PendingEndpoint` o `EvaluationLocked` | P3-11: bloquea sin `selection.json`; P3-13/P3-15 llenan los datos |
-| `/ml-api/models` | GET | `PendingEndpoint` | Pendiente — P3-14 |
+| `/ml-api/evaluation` | GET | `EvaluationReport`, `EvaluationLocked` o `PendingEndpoint` | Real (P3-15): candado P3-11; `PendingEndpoint` (P3-13) solo si falta `reports/evaluation` |
+| `/ml-api/crops/{crop_id}` | GET | `image/jpeg` | Real (P3-15): recorte real de `data/derived/crops/images/` |
+| `/ml-api/models` | GET | `ModelList` o `PendingEndpoint` | P3-15: lee `reports/models/registry.json` (P3-14); `PendingEndpoint` mientras no exista |
+| `/ml-api/models/{version}` | GET | `ModelDetail` | Real (P3-15): tarjeta, procedencia y URL prefirmada |
+| `/ml-api/models/active` | POST | `SetActiveVersionRequest` → `ModelDetail` | Real (P3-15): rechaza marcar una versión sin objeto en S3 |
 | `/ml-api/inference` | GET | `PendingEndpoint` | Pendiente — P3-16 |
 
 El progreso de una corrida (`status`/`progress`/`logs`/`heartbeat_at`) lo
@@ -151,3 +154,85 @@ cerrada, vuelve a responder `PendingEndpoint` (P3-13).
 El candado (`app/selection/lock.py`) lo usa también `final.py` (P3-13): con
 `--split test` exige la selección cerrada y el hash coincidente; con
 `--split validation` está exento (es el ensayo previo al cierre).
+
+## Evaluation (P3-15)
+
+`/ml-api/evaluation` responde, en este orden:
+
+1. `EvaluationLocked` (200) si el candado de P3-11 está activo.
+2. `PendingEndpoint` (200, ticket `P3-13`) si la selección está cerrada pero
+   todavía no existen `reports/evaluation/{metrics,analysis}.json`.
+3. `EvaluationReport` (200) cuando ambos existen. La API **no recalcula**: solo
+   une el sello de P3-11 (`selection.json`) con lo que P3-13 midió una sola vez.
+
+| Campo | Fuente | Notas |
+|---|---|---|
+| `run_id`, `release`, `manifest_id`, `manifest_sha256`, `checkpoint_sha256`, `selected_at` | `selection.json` | procedencia |
+| `grid_row`, `best_val_accuracy`, `best_val_macro_f1`, `best_val_loss` | `selection.json.candidate` | métricas de validación del candidato |
+| `classes`, `accuracy`, `macro_f1`, `confusion_matrix`, `per_class`, `total` | `evaluation/metrics.json` | accuracy = diagonal ÷ total, sin redondear |
+| `baseline_majority_accuracy`, `most_confused_class`, `recall_per_class`, `accuracy_hides_low_recall`, `successes`, `errors` | `evaluation/analysis.json` | `successes`/`errors` son `EvaluationExample` |
+
+`EvaluationExample`: `{crop_id, source_image_id, true_class, predicted_class,
+probability}`. El frontend arma la imagen con `/ml-api/crops/<crop_id>`.
+
+### `/ml-api/crops/{crop_id}` (P3-15)
+
+Sirve `data/derived/crops/images/<crop_id>.jpg` (P3-04). `crop_id` se revalida
+con `^\d{6}_\d{6}$` antes de tocar el disco (path traversal): un valor inválido
+da `400`, un archivo ausente `404`.
+
+## Models (P3-15)
+
+El catálogo lo produce **P3-14** en `reports/models/registry.json`. Este es el
+contrato que P3-15 propone a P3-14 (un campo de más o de menos es un bug, como
+en el resto del repo):
+
+```json
+{
+  "schema_version": "1.0",
+  "model_name": "clasificador-perro-gato",
+  "versions": [
+    {
+      "version": "1.0.0",
+      "dataset_version": "v0.1.1",
+      "run_id": "7e7b4a4b...",
+      "release": "v0.1.1",
+      "manifest_id": "v0.1.1-53fc84fdaa07",
+      "manifest_sha256": "…",
+      "checkpoint_sha256": "…",
+      "package_sha256": "…",
+      "s3_bucket": "mlops-p3-models-222629887955",
+      "s3_key": "models/clasificador-perro-gato/1.0.0/",
+      "s3_version_id": "…",
+      "published_at": "2026-09-30T18:00:00Z",
+      "selected": true,
+      "card": "texto de la tarjeta (markdown/plain)"
+    }
+  ]
+}
+```
+
+`dataset_version` va separada de `version`: la versión del dataset no es la del
+modelo (requisito del #23).
+
+| Ruta | Contrato | Notas |
+|---|---|---|
+| `GET /ml-api/models` | `ModelList` | agrega `head-object` en vivo (`ModelSummary.s3_status`) |
+| `GET /ml-api/models/{version}` | `ModelDetail` | tarjeta + procedencia + URL prefirmada de descarga |
+| `POST /ml-api/models/active` | `{version}` → `ModelDetail` | 400 si el objeto no existe en S3, 404 si la versión no está en el registry |
+
+La **versión activa para inferencia** (P3-16) vive en
+`reports/models/active_version.json` (`{"active_version": "1.0.0"}`), escrito
+atómicamente por `ml-api`. `ml-api` monta `reports/` en lectura/escritura solo
+por este archivo (`.gitignore`).
+
+### Decisiones abiertas (P3-14 / P3-16)
+
+- **Ubicación/esquema de `registry.json`:** lo propone P3-15 y lo confirma
+  P3-14 antes de publicar la `0.1.0`.
+- **Bucket de modelos (AWS S3 vs MinIO):** el `head-object` y la URL prefirmada
+  son inyectables (`app/ml_api/server.py`); hoy el proveedor por defecto usa el
+  cliente de `storage/object_store.py`. Si el bucket final es el de AWS
+  (`mlops-p3-models-…` con SSO `mlops-p3`), P3-14 debe aportar el cliente/rol.
+- **`active_version.json` vs una tabla en MariaDB:** si P3-16 prefiere leerlo de
+  la base (como `training_jobs`), se migra sin tocar el contrato HTTP.
