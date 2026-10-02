@@ -68,3 +68,8 @@ class EvaluationLocked(ContractModel):
     status: Literal["selection_not_closed"] = "selection_not_closed"
     ticket: str = "P3-11"
     message: str
+
+
+class TagUpdate(ContractModel):
+    key: str
+    value: str
