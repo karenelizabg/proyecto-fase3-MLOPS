@@ -69,7 +69,7 @@ describe("SPEC-P3-03-NAV - las 5 rutas de Modelo existen y se alcanzan desde el 
     await screen.findByRole("heading", { name: "Training" });
 
     fireEvent.click(screen.getByRole("link", { name: "Experiments" }));
-    expect(await screen.findByRole("heading", { name: "Experiments" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Experimentos de MLflow en vivo/i })).toBeInTheDocument();
     expect(await screen.findByText(/Experimentos de MLflow en vivo/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("link", { name: "Evaluation" }));
@@ -103,6 +103,6 @@ describe("SPEC-P3-03-NAV - las 5 rutas de Modelo existen y se alcanzan desde el 
 
     fireEvent.click(screen.getByRole("link", { name: "Training" }));
 
-    expect(await screen.findByRole("heading", { name: /Experimentos de MLflow en vivo/i })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Training" })).toBeInTheDocument();
   });
 });
