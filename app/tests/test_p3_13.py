@@ -4,6 +4,9 @@ Las pruebas de métricas/análisis son puras (fixture calculado a mano); las de
 `final.py` no entrenan ni tocan MLflow (fallan en el candado antes).
 """
 
+from datetime import datetime, timedelta, timezone
+
+import mlflow
 import pytest
 
 from evaluation.analysis import analyze
@@ -12,6 +15,9 @@ from evaluation.metrics import evaluate
 from final import MANIFEST_SPLITS, _source_images
 from final import main as final_main
 from recompute import sklearn_metrics
+from selection.contracts import Candidate, Selection
+from selection.lock import test_ids_sha256 as compute_test_ids_sha256
+from selection.mlflow_reader import EXPERIMENT
 
 
 def a_prediction(
@@ -165,3 +171,112 @@ def test_validation_split_reads_only_val_never_test(tmp_path):
     assert MANIFEST_SPLITS["validation"] == "val"
     assert _source_images(manifest, MANIFEST_SPLITS["validation"]) == {"v1": "1", "v2": "2"}
     assert _source_images(manifest, MANIFEST_SPLITS["test"]) == {"t1": "3"}
+
+
+# --- retro PR #56: "una sola vez" y cronología antes de crear nada --------------
+
+
+@pytest.fixture
+def mlflow_uri(tmp_path):
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    previous = mlflow.get_tracking_uri()
+    mlflow.set_tracking_uri(uri)
+    try:
+        yield uri
+    finally:
+        mlflow.set_tracking_uri(previous)
+
+
+def write_selection_and_manifest(tmp_path, *, selected_at):
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "crop_id,split,label,source_image_id,duplicate_group_id\n"
+        "000001_000001,test,0,1,g000001\n"
+        "000002_000002,train,1,2,g000002\n",
+        encoding="utf-8",
+    )
+    selection = Selection(
+        run_id="rid-1",
+        release="v0.1.1",
+        manifest_id="v0.1.1-test",
+        manifest_sha256="a" * 64,
+        checkpoint_sha256="b" * 64,
+        test_ids_sha256=compute_test_ids_sha256(manifest),
+        selected_at=selected_at,
+        candidate=Candidate(
+            grid_row="r02",
+            best_val_accuracy=0.9,
+            best_val_macro_f1=0.9,
+            best_val_loss=0.1,
+        ),
+    )
+    selection_path = tmp_path / "selection.json"
+    selection_path.write_text(selection.model_dump_json(), encoding="utf-8")
+    return selection_path, manifest
+
+
+def test_final_test_refuses_when_metrics_already_exist(tmp_path):
+    output_dir = tmp_path / "evaluation"
+    output_dir.mkdir()
+    (output_dir / "metrics.json").write_text("{}", encoding="utf-8")
+    rc = final_main(
+        [
+            "--split",
+            "test",
+            "--selection",
+            str(tmp_path / "no-existe.json"),
+            "--manifest-csv",
+            str(tmp_path / "manifest.csv"),
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+    assert rc == 5
+    assert (output_dir / "metrics.json").read_text(encoding="utf-8") == "{}"
+
+
+def test_final_test_refuses_before_selected_at(tmp_path):
+    selection_path, manifest = write_selection_and_manifest(
+        tmp_path, selected_at=datetime.now(timezone.utc) + timedelta(days=1)
+    )
+    output_dir = tmp_path / "out"
+    rc = final_main(
+        [
+            "--split",
+            "test",
+            "--selection",
+            str(selection_path),
+            "--manifest-csv",
+            str(manifest),
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+    assert rc == 6
+    assert not output_dir.exists()
+
+
+def test_final_test_refuses_when_an_evaluation_run_already_exists(tmp_path, mlflow_uri):
+    selection_path, manifest = write_selection_and_manifest(
+        tmp_path, selected_at=datetime.now(timezone.utc) - timedelta(days=1)
+    )
+    mlflow.set_experiment(EXPERIMENT)
+    with mlflow.start_run():
+        mlflow.set_tag("evaluation_of", "rid-1")
+    output_dir = tmp_path / "out"
+    rc = final_main(
+        [
+            "--split",
+            "test",
+            "--tracking-uri",
+            mlflow_uri,
+            "--selection",
+            str(selection_path),
+            "--manifest-csv",
+            str(manifest),
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+    assert rc == 5
+    assert not output_dir.exists()

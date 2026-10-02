@@ -2,9 +2,11 @@
 
 Pasa por el candado (`selection.lock`), verifica el `checkpoint_sha256`, usa
 `training/preprocess.py` y escribe `predictions.csv`, `metrics.json` y
-`analysis.json`. Con `--split test` crea la corrida de evaluación en MLflow y
-verifica `start_time > selected_at`; con `--split validation` ensaya (exento del
-candado) y escribe en `reports/evaluation/validation/`.
+`analysis.json`. Con `--split test` verifica que `now > selected_at` **antes** de
+crear nada, se niega a repetirse (si ya hay `metrics.json` o una corrida con
+`evaluation_of`), y luego crea la corrida de evaluación en MLflow; con
+`--split validation` ensaya (exento del candado) y escribe en
+`reports/evaluation/validation/`.
 
 Uso (desde la raíz del repo, con el venv de `app/`):
 
@@ -31,6 +33,7 @@ from evaluation.contracts import CLASSES, Prediction
 from evaluation.metrics import evaluate
 from selection.contracts import SelectionLocked
 from selection.lock import load_selection, require_closed
+from selection.mlflow_reader import EXPERIMENT
 from training.config import TrainingConfig
 from training.data import create_dataloader
 from training.model import build_model
@@ -89,6 +92,17 @@ def write_predictions_csv(predictions: list[Prediction], path: Path) -> None:
             )
 
 
+def _already_evaluated(client: MlflowClient, run_id: str) -> bool:
+    """¿Ya existe una corrida de evaluación para `run_id`? La evaluación es única."""
+    experiment = client.get_experiment_by_name(EXPERIMENT)
+    if experiment is None:
+        return False
+    runs = client.search_runs(
+        [experiment.experiment_id], filter_string=f"tags.evaluation_of = '{run_id}'"
+    )
+    return bool(runs)
+
+
 def _log_evaluation_run(
     *, tracking_uri: str, candidate, selection, predictions, metrics, analysis, output_dir
 ) -> str:
@@ -98,11 +112,6 @@ def _log_evaluation_run(
         experiment_id=experiment.experiment_id, run_name="evaluacion-final"
     ) as run:
         started = datetime.fromtimestamp(run.info.start_time / 1000, tz=timezone.utc)
-        if started <= selection.selected_at:
-            raise RuntimeError(
-                f"la evaluación arrancó ({started.isoformat()}) antes de selected_at "
-                f"({selection.selected_at.isoformat()})"
-            )
         tags = {key: str(value) for key, value in candidate.data.tags.items()}
         tags.update(
             {
@@ -158,6 +167,11 @@ def main(argv: list[str] | None = None) -> int:
     else:
         output_dir = REPO_ROOT / "reports" / "evaluation" / "validation"
 
+    # La evaluación final es única (sección 11): no repetirla.
+    if args.split == TEST_SPLIT and (output_dir / "metrics.json").exists():
+        print("final: ya existe una evaluación final (metrics.json); es única", file=sys.stderr)
+        return 5
+
     try:
         selection = require_closed(
             split=args.split, selection_path=selection_path, manifest_csv=manifest_csv
@@ -181,7 +195,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    # Cronología: la evaluación es posterior a selected_at. Se comprueba ANTES de
+    # crear nada (ni corrida de MLflow ni archivos).
+    if selection is not None and datetime.now(timezone.utc) <= selection.selected_at:
+        print(
+            "final: la evaluación no puede correr antes de selected_at "
+            f"({selection.selected_at.isoformat()})",
+            file=sys.stderr,
+        )
+        return 6
+
     client = MlflowClient(tracking_uri=args.tracking_uri)
+    if args.split == TEST_SPLIT and _already_evaluated(client, run_id):
+        print(f"final: ya existe una corrida de evaluación para {run_id}", file=sys.stderr)
+        return 5
     candidate = client.get_run(run_id)
     config = TrainingConfig.model_validate(config_from_run_params(candidate.data.params))
     expected_sha = candidate.data.tags.get("checkpoint_sha256")
