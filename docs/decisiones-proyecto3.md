@@ -120,7 +120,7 @@ cd app && uv run python -m crops.counts --annotations-dir ../data/raw/annotation
 
 - **Principal:** `val_accuracy` (mayor es mejor).
 - **Desempate:** `val_macro_f1`; si persiste, menor `val_loss`.
-- **Prohibido:** cualquier métrica `test_*`. `select.py` falla si la recibe.
+- **Prohibido:** cualquier métrica `test_*`. `select_candidate.py` falla si la recibe.
 
 ## 6. Semillas
 

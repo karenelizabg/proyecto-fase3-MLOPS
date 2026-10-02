@@ -19,7 +19,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
-from ml_api.contracts import PendingEndpoint, TrainingJob, TrainingJobList
+from ml_api.contracts import EvaluationLocked, PendingEndpoint, TrainingJob, TrainingJobList
 from ml_api.repository import (
     TrainingJobNotCancellable,
     create_training_job,
@@ -27,6 +27,7 @@ from ml_api.repository import (
     request_training_job_cancellation,
 )
 from ml_api.training_jobs import TrainingJobRejected, validate_new_training_job
+from selection.lock import lock_reason
 from storage.db import get_engine
 from storage.settings import Settings
 
@@ -130,6 +131,15 @@ def create_app(
             return JSONResponse({"error": "no existe ese training_job"}, status_code=404)
         return JSONResponse(job.model_dump(mode="json"))
 
+    def evaluation(_: Request) -> JSONResponse:
+        reason = lock_reason(
+            selection_path=settings.reports_dir / "selection.json",
+            derived_dir=settings.derived_dir,
+        )
+        if reason:
+            return JSONResponse(EvaluationLocked(message=reason).model_dump(mode="json"))
+        return JSONResponse(_PENDING["evaluation"].model_dump(mode="json"))
+
     def pending(name: str):
         async def handler(_: Request) -> JSONResponse:
             return JSONResponse(_PENDING[name].model_dump(mode="json"))
@@ -143,7 +153,7 @@ def create_app(
             Route("/training/jobs", create_training_job_route, methods=["POST"]),
             Route("/training/jobs/{job_id}/cancel", cancel_training_job_route, methods=["POST"]),
             Route("/experiments", pending("experiments"), methods=["GET"]),
-            Route("/evaluation", pending("evaluation"), methods=["GET"]),
+            Route("/evaluation", evaluation, methods=["GET"]),
             Route("/models", pending("models"), methods=["GET"]),
             Route("/inference", pending("inference"), methods=["GET"]),
         ]
