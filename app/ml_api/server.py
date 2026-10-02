@@ -169,11 +169,11 @@ def create_app(
         middleware=[
             Middleware(
                 CORSMiddleware,
-                allow_origins=["*"], 
+                allow_origins=["*"],
                 allow_methods=["*"],
                 allow_headers=["*"],
             )
-        ]
+        ],
     )
 
 

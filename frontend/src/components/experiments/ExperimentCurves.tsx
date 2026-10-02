@@ -55,7 +55,12 @@ export const ExperimentCurves = ({
             tickFormatter={(value) => value.toFixed(3)}
           />
           <Tooltip
-            formatter={(value: number) => [value.toFixed(4), metricKey]}
+            formatter={(value: any) => {
+              if (typeof value === "number") {
+                return [value.toFixed(4), metricKey];
+              }
+              return [String(value ?? "N/A"), metricKey];
+            }}
             labelFormatter={(label) => `Época ${label}`}
           />
           <Line
