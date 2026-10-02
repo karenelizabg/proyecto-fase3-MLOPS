@@ -55,3 +55,16 @@ class PendingEndpoint(ContractModel):
     status: Literal["pending"] = "pending"
     ticket: str
     message: str
+
+
+class EvaluationLocked(ContractModel):
+    """P3-11 (#18): la API de Evaluation se niega a servir datos hasta que la
+    selección esté cerrada y el `test_ids_sha256` coincida con el manifiesto.
+
+    Cuando la selección sí está cerrada, `/evaluation` sigue devolviendo
+    `PendingEndpoint` hasta que P3-13/P3-15 construyan el payload real.
+    """
+
+    status: Literal["selection_not_closed"] = "selection_not_closed"
+    ticket: str = "P3-11"
+    message: str
