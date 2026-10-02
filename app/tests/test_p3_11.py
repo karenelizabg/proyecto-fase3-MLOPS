@@ -148,6 +148,26 @@ def test_validate_accepts_a_valid_run():
     assert result.invalid == []
 
 
+def test_validate_rejects_test_metrics_without_selected_candidate():
+    run = a_run(extra_metrics={"test_accuracy": 0.99})
+    result = validate_runs([run], manifest_sha256=MANIFEST_SHA, classes=CLASSES, min_required=1)
+    assert result.valid == []
+    assert any("test_" in reason for reason in result.invalid[0].reasons)
+
+
+def test_validate_accepts_test_metrics_on_the_already_selected_candidate():
+    """P3-13, revisión: una vez cerrada la selección, final.py registra test_*
+    en la propia corrida del candidato -- validate_runs no debe rechazarla por
+    eso si se vuelve a correr después."""
+    run = a_run(
+        extra_metrics={"test_accuracy": 0.99},
+        tags={"selected_candidate": "true", "selected_at": "2026-10-02T00:00:00+00:00"},
+    )
+    result = validate_runs([run], manifest_sha256=MANIFEST_SHA, classes=CLASSES, min_required=1)
+    assert result.valid == ["run-1"]
+    assert result.invalid == []
+
+
 @pytest.mark.parametrize(
     "run",
     [
@@ -200,9 +220,19 @@ def test_validate_passes_full_grid():
 
 
 def test_select_rejects_any_test_metric():
+    """Sin selected_candidate/selected_at: test_* sigue prohibida, antes y después
+    del candado (P3-13, revisión)."""
     run = a_run(extra_metrics={"test_accuracy": 0.99})
     with pytest.raises(ValueError, match="test_"):
         rank_runs([run])
+
+
+def test_select_accepts_test_metrics_on_the_already_selected_candidate():
+    run = a_run(
+        extra_metrics={"test_accuracy": 0.99},
+        tags={"selected_candidate": "true", "selected_at": "2026-10-02T00:00:00+00:00"},
+    )
+    assert rank_runs([run]) == [run]
 
 
 def test_select_orders_by_accuracy_then_tiebreakers():

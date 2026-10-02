@@ -58,6 +58,14 @@ class RunSummary(ContractModel):
         except json.JSONDecodeError:
             return None
 
+    @property
+    def is_selected_candidate(self) -> bool:
+        """`True` solo para el candidato ya cerrado (`select_candidate.py` pone
+        estos tags). Usado por `validate`/`select` para permitir métricas
+        `test_*` únicamente en esa corrida -- en cualquier otra, antes o
+        después del candado, siguen prohibidas (P3-13, revisión)."""
+        return self.tags.get("selected_candidate") == "true" and bool(self.tags.get("selected_at"))
+
 
 class RunValidity(ContractModel):
     run_id: str
