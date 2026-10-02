@@ -23,6 +23,15 @@ def test_ids_sha256(manifest_csv: Path) -> str:
     return hashlib.sha256("\n".join(ids).encode("utf-8")).hexdigest()
 
 
+def sha256_file(path: Path) -> str:
+    """SHA-256 de un archivo, por bloques (para verificar el `manifest.csv`)."""
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
 def load_selection(path: Path) -> Selection:
     if not path.is_file():
         raise SelectionLocked(f"no existe {path} (MODEL SELECTION no cerrada)")

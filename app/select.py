@@ -4,6 +4,17 @@ Escribe `reports/selection.json` y etiqueta la corrida ganadora en MLflow
 (`selected_candidate`, `selected_at`, `selection_metric`). Solo selecciona si
 `reports/experiments_validity.json` pasó.
 
+Varias comprobaciones antes de sellar, porque `test_ids_sha256` (el candado)
+depende de que las entradas sean coherentes:
+
+- la validez debe ser del mismo manifiesto que el `manifest_meta` (mismo
+  `manifest_sha256` y mismas `classes`);
+- el `manifest.csv` recibido debe ser ese manifiesto (su SHA-256 = `manifest_sha256`);
+- no debe haber otra corrida ya etiquetada `selected_candidate`.
+
+La escritura de `selection.json` es atómica (`open(..., "x")`) y re-ejecutar con
+la misma selección es idempotente (conserva el archivo y re-aplica los tags).
+
 Uso (desde la raíz del repo, con el venv de `app/`):
 
     app/.venv/bin/python validate_runs.py --release v0.1.1
@@ -23,12 +34,34 @@ from pathlib import Path
 from mlflow.tracking import MlflowClient
 
 from selection.contracts import Candidate, ExperimentsValidity, Selection
-from selection.lock import test_ids_sha256
-from selection.mlflow_reader import read_runs
+from selection.lock import sha256_file, test_ids_sha256
+from selection.mlflow_reader import EXPERIMENT, read_runs
 from selection.select import select_candidate
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SELECTION_METRIC = "best_val_accuracy"
+
+
+def _same_selection(existing: Selection, wanted: Selection) -> bool:
+    """Igual salvo `selected_at` (para que re-ejecutar sea idempotente)."""
+    return (
+        existing.run_id == wanted.run_id
+        and existing.manifest_sha256 == wanted.manifest_sha256
+        and existing.checkpoint_sha256 == wanted.checkpoint_sha256
+        and existing.test_ids_sha256 == wanted.test_ids_sha256
+    )
+
+
+def _already_selected_run(client: MlflowClient, winner_run_id: str) -> str | None:
+    """Otra corrida ya marcada como seleccionada, si existe."""
+    experiment = client.get_experiment_by_name(EXPERIMENT)
+    if experiment is None:
+        return None
+    runs = client.search_runs(
+        [experiment.experiment_id], filter_string="tags.selected_candidate = 'true'"
+    )
+    others = [run.info.run_id for run in runs if run.info.run_id != winner_run_id]
+    return others[0] if others else None
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,6 +92,21 @@ def main(argv: list[str] | None = None) -> int:
         print("select: la validación de corridas no pasó; no se selecciona", file=sys.stderr)
         return 1
 
+    # Las entradas deben describir el mismo manifiesto; si no, el candado sellaría
+    # un test que no es el que se validó.
+    if validity.manifest_sha256 != meta["manifest_sha256"]:
+        print(
+            "select: la validez no corresponde al manifiesto (manifest_sha256 distinto)",
+            file=sys.stderr,
+        )
+        return 3
+    if validity.classes != meta["classes"]:
+        print("select: las clases de la validez no coinciden con el manifiesto", file=sys.stderr)
+        return 3
+    if sha256_file(manifest_csv) != meta["manifest_sha256"]:
+        print("select: --manifest-csv no es el CSV de este manifiesto", file=sys.stderr)
+        return 3
+
     runs = read_runs(args.tracking_uri, run_kind="campaign")
     by_id = {run.run_id: run for run in runs}
     missing = [run_id for run_id in validity.valid if run_id not in by_id]
@@ -74,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
 
     now = datetime.now(timezone.utc)
     release = meta["release"]["name"] if isinstance(meta.get("release"), dict) else args.release
-    selection = Selection(
+    wanted = Selection(
         run_id=winner.run_id,
         release=release,
         manifest_id=meta["manifest_id"],
@@ -90,12 +138,32 @@ def main(argv: list[str] | None = None) -> int:
             best_val_loss=winner.metrics["best_val_loss"],
         ),
     )
-    out.write_text(selection.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
     client = MlflowClient(tracking_uri=args.tracking_uri)
+    other = _already_selected_run(client, winner.run_id)
+    if other is not None:
+        print(
+            f"select: ya hay otra corrida seleccionada ({other}); no se re-selecciona",
+            file=sys.stderr,
+        )
+        return 4
+
+    try:
+        with out.open("x", encoding="utf-8") as handle:
+            handle.write(wanted.model_dump_json(indent=2) + "\n")
+        selection = wanted
+    except FileExistsError:
+        existing = Selection.model_validate_json(out.read_text(encoding="utf-8"))
+        if not _same_selection(existing, wanted):
+            print("select: ya existe reports/selection.json con otra selección", file=sys.stderr)
+            return 4
+        selection = existing
+        print("select: selection.json ya existía (idéntico); solo se re-aplican los tags")
+
+    # El archivo ya existe; los tags son idempotentes.
     client.set_tag(winner.run_id, "selected_candidate", "true")
-    client.set_tag(winner.run_id, "selected_at", now.isoformat())
-    client.set_tag(winner.run_id, "selection_metric", SELECTION_METRIC)
+    client.set_tag(winner.run_id, "selected_at", selection.selected_at.isoformat())
+    client.set_tag(winner.run_id, "selection_metric", selection.selection_metric)
 
     print(json.dumps(selection.model_dump(mode="json"), indent=2, ensure_ascii=False))
     return 0

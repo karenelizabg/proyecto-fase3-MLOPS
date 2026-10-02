@@ -4,6 +4,7 @@ Las pruebas puras no tocan MLflow; solo `test_read_runs_roundtrip` usa un MLflow
 temporal (SQLite en `tmp_path`), igual patrón que `test_p3_08.py`.
 """
 
+import importlib.util
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,17 +23,48 @@ from selection.lock import (
     load_selection,
     lock_reason,
     require_closed,
+    sha256_file,
 )
 from selection.lock import (
     test_ids_sha256 as compute_test_ids_sha256,
 )
-from selection.mlflow_reader import read_runs
+from selection.mlflow_reader import EXPERIMENT, read_runs
 from selection.select import rank_runs, select_candidate
 from selection.validate import validate_runs
 
 MANIFEST_SHA = "a" * 64
 CHECKPOINT_SHA = "b" * 64
 CLASSES = {"0": "cat", "1": "dog"}
+
+# Semillas, patience y min_delta congelados (training.grid); toda corrida válida
+# los trae con estos valores.
+FROZEN_PARAMS = {
+    "seed_split": "42",
+    "seed_train": "43",
+    "seed_aug": "44",
+    "seed_model": "45",
+    "patience": "3",
+    "min_delta": "0.001",
+}
+
+GRID_R01 = {
+    "optimizer": "adam",
+    "batch_size": "32",
+    "max_epochs": "15",
+    "learning_rate": "0.001",
+    "image_size": "128",
+    "hidden_layers": "0",
+    "dropout": "0.0",
+}
+GRID_R02 = {
+    "optimizer": "sgd",
+    "batch_size": "16",
+    "max_epochs": "30",
+    "learning_rate": "0.01",
+    "image_size": "160",
+    "hidden_layers": "1",
+    "dropout": "0.3",
+}
 
 
 def a_run(
@@ -48,6 +80,7 @@ def a_run(
     extra_metrics: dict | None = None,
 ) -> RunSummary:
     base_params = {
+        **FROZEN_PARAMS,
         "optimizer": "adam",
         "batch_size": "32",
         "max_epochs": "15",
@@ -337,3 +370,228 @@ def test_load_selection_validates_contract(tmp_path):
     loaded = load_selection(path)
     assert loaded.selection_metric == "best_val_accuracy"
     assert loaded.candidate.grid_row == "r02"
+
+
+# --- retro PR #53: valores congelados y campaign con grid_row -------------------
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param({"seed_train": "99"}, id="semilla"),
+        pytest.param({"patience": "5"}, id="patience"),
+        pytest.param({"min_delta": "0.01"}, id="min-delta"),
+    ],
+)
+def test_validate_rejects_unfrozen_hyperparameters(bad):
+    result = validate_runs(
+        [a_run(params=bad)], manifest_sha256=MANIFEST_SHA, classes=CLASSES, min_required=1
+    )
+    assert result.valid == []
+    assert any("congelad" in reason for entry in result.invalid for reason in entry.reasons)
+
+
+def test_validate_rejects_campaign_without_grid_row():
+    result = validate_runs(
+        [a_run(grid_row="")], manifest_sha256=MANIFEST_SHA, classes=CLASSES, min_required=1
+    )
+    assert result.valid == []
+    assert any("grid_row" in reason for entry in result.invalid for reason in entry.reasons)
+
+
+# --- retro PR #53: candado de select.py (cruce de entradas y atomicidad) --------
+
+
+def _load_select_cli():
+    """`select.py` choca con el módulo `select` de la stdlib; se carga por ruta."""
+    path = Path(__file__).resolve().parents[1] / "select.py"
+    spec = importlib.util.spec_from_file_location("p3_11_select_cli", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+select_cli = _load_select_cli()
+
+
+@pytest.fixture
+def mlflow_uri(tmp_path):
+    uri = f"sqlite:///{tmp_path}/mlflow.db"
+    previous = mlflow.get_tracking_uri()
+    mlflow.set_tracking_uri(uri)
+    try:
+        yield uri
+    finally:
+        mlflow.set_tracking_uri(previous)
+
+
+def log_campaign_run(*, grid_row: str, params: dict, manifest_sha256: str) -> str:
+    with mlflow.start_run() as run:
+        mlflow.log_params(params)
+        mlflow.set_tags(
+            {
+                "run_kind": "campaign",
+                "grid_row": grid_row,
+                "manifest_sha256": manifest_sha256,
+                "classes": json.dumps(CLASSES),
+                "git_dirty": "false",
+                "checkpoint_sha256": CHECKPOINT_SHA,
+            }
+        )
+        mlflow.log_metric("best_val_accuracy", 0.9)
+        mlflow.log_metric("best_val_macro_f1", 0.9)
+        mlflow.log_metric("best_val_loss", 0.2)
+        mlflow.log_metric("stopped_epoch", 5)
+        return run.info.run_id
+
+
+def write_meta(path: Path, *, manifest_sha256: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "manifest_id": "v0.1.1-test",
+                "manifest_sha256": manifest_sha256,
+                "classes": CLASSES,
+                "release": {"name": "v0.1.1"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def write_validity(path: Path, runs: list[RunSummary], *, manifest_sha256: str) -> None:
+    validity = validate_runs(
+        runs, manifest_sha256=manifest_sha256, classes=CLASSES, min_required=len(runs)
+    )
+    path.write_text(validity.model_dump_json(), encoding="utf-8")
+
+
+def select_argv(tracking_uri, *, meta, manifest, validity, out) -> list[str]:
+    return [
+        "--tracking-uri",
+        tracking_uri,
+        "--manifest-meta",
+        str(meta),
+        "--manifest-csv",
+        str(manifest),
+        "--validity",
+        str(validity),
+        "--out",
+        str(out),
+    ]
+
+
+def test_select_refuses_when_validity_manifest_differs(tmp_path):
+    manifest = tmp_path / "manifest.csv"
+    write_manifest(manifest, ["a", "b"])
+    sha = sha256_file(manifest)
+    meta = tmp_path / "meta.json"
+    write_meta(meta, manifest_sha256=sha)
+
+    other = "b" * 64
+    validity = tmp_path / "validity.json"
+    write_validity(
+        validity,
+        [
+            a_run("r1", "r01", manifest_sha256=other, params=GRID_R01),
+            a_run("r2", "r02", manifest_sha256=other, params=GRID_R02),
+        ],
+        manifest_sha256=other,
+    )
+    out = tmp_path / "selection.json"
+    rc = select_cli.main(
+        select_argv("sqlite:///unused.db", meta=meta, manifest=manifest, validity=validity, out=out)
+    )
+    assert rc == 3
+    assert not out.exists()
+
+
+def test_select_refuses_when_csv_is_not_the_manifest(tmp_path):
+    manifest = tmp_path / "manifest.csv"
+    write_manifest(manifest, ["a", "b"])
+    sha = sha256_file(manifest)
+    meta = tmp_path / "meta.json"
+    write_meta(meta, manifest_sha256=sha)
+    validity = tmp_path / "validity.json"
+    write_validity(
+        validity,
+        [
+            a_run("r1", "r01", manifest_sha256=sha, params=GRID_R01),
+            a_run("r2", "r02", manifest_sha256=sha, params=GRID_R02),
+        ],
+        manifest_sha256=sha,
+    )
+    wrong_csv = tmp_path / "wrong.csv"
+    write_manifest(wrong_csv, ["x", "y", "z"])
+    out = tmp_path / "selection.json"
+    rc = select_cli.main(
+        select_argv(
+            "sqlite:///unused.db", meta=meta, manifest=wrong_csv, validity=validity, out=out
+        )
+    )
+    assert rc == 3
+    assert not out.exists()
+
+
+def test_select_writes_file_then_tags_and_is_idempotent(tmp_path, mlflow_uri):
+    mlflow.set_experiment(EXPERIMENT)
+    manifest = tmp_path / "manifest.csv"
+    write_manifest(manifest, ["a", "b"])
+    sha = sha256_file(manifest)
+    meta = tmp_path / "meta.json"
+    write_meta(meta, manifest_sha256=sha)
+
+    first = log_campaign_run(grid_row="r01", params=GRID_R01, manifest_sha256=sha)
+    second = log_campaign_run(grid_row="r02", params=GRID_R02, manifest_sha256=sha)
+    validity = tmp_path / "validity.json"
+    write_validity(
+        validity,
+        [
+            a_run(first, "r01", manifest_sha256=sha, params=GRID_R01),
+            a_run(second, "r02", manifest_sha256=sha, params=GRID_R02),
+        ],
+        manifest_sha256=sha,
+    )
+    out = tmp_path / "selection.json"
+    argv = select_argv(mlflow_uri, meta=meta, manifest=manifest, validity=validity, out=out)
+
+    assert select_cli.main(argv) == 0
+    selection = Selection.model_validate_json(out.read_text(encoding="utf-8"))
+    assert selection.run_id in {first, second}
+    assert mlflow.get_run(selection.run_id).data.tags["selected_candidate"] == "true"
+
+    # Re-ejecutar con la misma selección es idempotente y conserva el archivo.
+    before = out.read_text(encoding="utf-8")
+    assert select_cli.main(argv) == 0
+    assert out.read_text(encoding="utf-8") == before
+
+
+def test_select_refuses_when_another_run_is_already_selected(tmp_path, mlflow_uri):
+    mlflow.set_experiment(EXPERIMENT)
+    manifest = tmp_path / "manifest.csv"
+    write_manifest(manifest, ["a", "b"])
+    sha = sha256_file(manifest)
+    meta = tmp_path / "meta.json"
+    write_meta(meta, manifest_sha256=sha)
+
+    first = log_campaign_run(grid_row="r01", params=GRID_R01, manifest_sha256=sha)
+    second = log_campaign_run(grid_row="r02", params=GRID_R02, manifest_sha256=sha)
+    with mlflow.start_run():
+        mlflow.set_tag("selected_candidate", "true")  # otra corrida ya seleccionada
+
+    validity = tmp_path / "validity.json"
+    write_validity(
+        validity,
+        [
+            a_run(first, "r01", manifest_sha256=sha, params=GRID_R01),
+            a_run(second, "r02", manifest_sha256=sha, params=GRID_R02),
+        ],
+        manifest_sha256=sha,
+    )
+    out = tmp_path / "selection.json"
+    rc = select_cli.main(
+        select_argv(mlflow_uri, meta=meta, manifest=manifest, validity=validity, out=out)
+    )
+    assert rc == 4
+    assert not out.exists()
