@@ -8,11 +8,12 @@ desempate por `best_val_macro_f1` (mayor) y luego menor `best_val_loss`.
 - **Manifiesto:** `v0.1.1-53fc84fdaa07` · `manifest_sha256` `53fc84fdaa0715f37d90324ae49be39034e2a67bc09ae0a1f1fec8425aeec80f`
 - **`checkpoint_sha256`:** `f759cde23fc314b63c4a4e3c20127ef1eb84121e579b04e7c97911ada20ab7d9`
 - **`test_ids_sha256` (sello del test):** `2ff781befc9d118ead9f9af49274fa541e63457d89be306033d22bd563eb4b22`
-- **`selected_at`:** `2026-10-02T04:14:02.736704Z`
 
 El candado (`app/selection/lock.py`) exige que ese `test_ids_sha256` coincida
 con el manifiesto para dejar correr la evaluación en `test`; la API de
-Evaluation se niega hasta que exista `reports/selection.json`.
+Evaluation se niega hasta que exista `reports/selection.json`. Ese archivo —y el
+`selected_at`— los produce `app/select_candidate.py` cuando Karen declara
+**MODEL SELECTION CLOSED** (todavía no se ha sellado).
 
 ## Ranking (por la métrica de selección)
 
@@ -34,16 +35,19 @@ Evaluation se niega hasta que exista `reports/selection.json`.
 Mayor `best_val_accuracy` de la rejilla (0.9618) y,
 entre las de ese valor, el mayor `best_val_macro_f1` (0.9618).
 adam, batch 32, 15 épocas máx., lr 3e-4, imagen 128, 1 capa oculta, dropout 0.3.
-Se etiquetó en MLflow con `selected_candidate`, `selected_at` y `selection_metric`.
+Al cerrarse la selección, `app/select_candidate.py` etiqueta esta corrida en
+MLflow con `selected_candidate`, `selected_at` y `selection_metric`.
 
 ## Descartadas (2)
 
-- **`r06`** (`0d202fdb6fd849a59a1423eaea882165`): subcampeona con `best_val_accuracy` 0.9542.
-  Descartada solo por quedar por debajo de r02; su `best_epoch` fue 1, señal de
-  que no mejoró tras la primera época (menos estable).
-- **`r04`** (`f13d017045c24e8aa59320e6cbcb9126`): `best_val_accuracy` 0.9313, empatada con r01/r07
-  pero con `best_epoch=1`: el modelo quedó en su mejor punto en la primera época y
-  no volvió a mejorar, así que se prefiere una corrida con más margen.
+La regla es solo la métrica de la sección 5 (`best_val_accuracy`; desempate por
+`best_val_macro_f1`, luego menor `best_val_loss`):
+
+- **`r06`** (`0d202fdb6fd849a59a1423eaea882165`): `best_val_accuracy` 0.9542,
+  menor que el 0.9618 de r02.
+- **`r04`** (`f13d017045c24e8aa59320e6cbcb9126`): `best_val_accuracy` 0.9313;
+  en el empate de 0.9313 con r07/r01, su `best_val_macro_f1` (0.9312) es menor
+  que el de r07 (0.9313) y r01 (0.9313).
 
 Con la selección cerrada, el test queda bajo custodia de Karen: `final.py`
 (`--split test`, P3-13) solo corre después de que ella declare **MODEL SELECTION CLOSED**.

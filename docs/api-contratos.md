@@ -98,7 +98,7 @@ por qué, mientras esa pieza no existe.
 
 P3-11 no expone endpoints nuevos: produce dos reportes versionados y un candado
 sobre `/ml-api/evaluation`. La lógica vive en `app/selection/` (pura) y los CLIs
-`app/validate_runs.py` / `app/select.py`.
+`app/validate_runs.py` / `app/select_candidate.py`.
 
 ### `reports/experiments_validity.json`
 
