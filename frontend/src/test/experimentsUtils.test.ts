@@ -41,6 +41,6 @@ describe("Lógica de la Tabla de Experimentos (P3-12)", () => {
 
   it("debe construir el enlace profundo exacto a la UI de MLflow", () => {
     const link = getMLflowLink("0", "abc");
-    expect(link).toBe("http://localhost:5000/#/experiments/0/runs/abc");
+    expect(link).toBe("http://localhost:5050/#/experiments/0/runs/abc");
   });
 });
