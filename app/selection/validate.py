@@ -3,7 +3,9 @@
 Una corrida cuenta como válida solo si cumple la sección 8 de
 `docs/decisiones-proyecto3.md` ("una corrida a la que le falte algo de esta
 lista no cuenta como válida"): está `FINISHED`, trae todos los tags, parámetros,
-métricas finales y artefactos del contrato, no registra ninguna métrica `test_*`,
+métricas finales y artefactos del contrato, no registra ninguna métrica `test_*`
+(salvo el candidato ya cerrado: `selected_candidate=true` y `selected_at`, ver
+`RunSummary.is_selected_candidate` -- P3-13 registra esas métricas ahí mismo),
 usa el mismo `manifest_sha256` y `classes`, tiene ≥2 épocas, `git_dirty="false"`,
 no duplica los parámetros de rejilla de otra corrida, trae las semillas/`patience`/
 `min_delta` congelados y, si es `campaign`, un `grid_row` `r01` a `r12`.
@@ -74,7 +76,7 @@ def _missing_reasons(run: RunSummary) -> list[str]:
     if missing_metrics:
         reasons.append(f"faltan métricas finales: {missing_metrics}")
     test_metrics = sorted(key for key in run.metrics if key.startswith("test_"))
-    if test_metrics:
+    if test_metrics and not run.is_selected_candidate:
         reasons.append(f"métricas test_* prohibidas: {test_metrics}")
     missing_artifacts = [a for a in REQUIRED_ARTIFACTS if a not in run.artifacts]
     if missing_artifacts:
