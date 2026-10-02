@@ -30,5 +30,16 @@ if [ ${#SERVICES[@]} -eq 0 ]; then
 fi
 
 echo "[build_trainer] GIT_COMMIT=$GIT_COMMIT GIT_DIRTY=$GIT_DIRTY"
-echo "[build_trainer] Reconstruyendo: ${SERVICES[*]}"
-docker compose build "${SERVICES[@]}"
+echo "[build_trainer] Reconstruyendo (secuencial): ${SERVICES[*]}"
+
+# P3-10: `docker compose build a b` (buildx bake) construye los targets en
+# paralelo, y todos comparten el mismo cache mount de uv (`/root/.cache/uv`,
+# Dockerfile.ml). Al descargar los paquetes pesados de `--group ml`, dos
+# `uv sync` concurrentes se pelean el lock de la distribution cache y uno
+# revienta con "Timeout (300s) when waiting for lock" (visto real: nvidia-cufile
+# en Mac M3, con trainer-worker y ml-api a la vez). Se construye uno por uno
+# para que solo haya un `uv sync` tocando el cache; el cache se reaprovecha
+# entre servicios, así que el único costo extra es la serialización.
+for service in "${SERVICES[@]}"; do
+  docker compose build "$service"
+done
