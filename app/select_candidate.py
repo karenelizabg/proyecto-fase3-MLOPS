@@ -18,7 +18,7 @@ la misma selección es idempotente (conserva el archivo y re-aplica los tags).
 Uso (desde la raíz del repo, con el venv de `app/`):
 
     app/.venv/bin/python validate_runs.py --release v0.1.1
-    app/.venv/bin/python select.py --release v0.1.1
+    app/.venv/bin/python select_candidate.py --release v0.1.1
 
 Después de correrlo, Karen declara **MODEL SELECTION CLOSED**. No toca el
 split `test`.

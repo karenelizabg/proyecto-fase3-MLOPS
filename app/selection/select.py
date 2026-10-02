@@ -18,7 +18,7 @@ def _forbidden_metrics(run: RunSummary) -> list[str]:
 def rank_runs(runs: list[RunSummary]) -> list[RunSummary]:
     offenders = {run.run_id: keys for run in runs if (keys := _forbidden_metrics(run))}
     if offenders:
-        raise ValueError(f"select.py prohíbe métricas test_*: {offenders}")
+        raise ValueError(f"la selección prohíbe métricas test_*: {offenders}")
     return sorted(
         runs,
         key=lambda run: (

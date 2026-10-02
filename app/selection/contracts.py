@@ -1,7 +1,7 @@
 """Contratos de P3-11 (#18); solo validación, sin I/O.
 
 - `RunSummary`: lo que se lee de una corrida de MLflow (parámetros, tags y
-  métricas finales). `validate.py`/`select.py` trabajan sobre esto.
+  métricas finales). Los módulos puros `validate`/`select` trabajan sobre esto.
 - `ExperimentsValidity`: el reporte `reports/experiments_validity.json`.
 - `Selection`: el reporte `reports/selection.json`, que leen P3-11, P3-13,
   P3-14 y P3-15.
