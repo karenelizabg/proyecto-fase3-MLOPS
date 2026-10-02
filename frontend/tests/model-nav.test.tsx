@@ -92,17 +92,17 @@ describe("SPEC-P3-03-NAV - las 5 rutas de Modelo existen y se alcanzan desde el 
     );
     renderAt("/experiments");
 
-    expect(await screen.findByRole("heading", { name: "Experiments" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Experimentos de MLflow en vivo/i })).toBeInTheDocument();
     expect(await screen.findByText(/Experimentos de MLflow en vivo/i)).toBeInTheDocument();
   });
 
   it("Training se conecta al menú de Training desde Experiments", async () => {
     mockMlApi();
     renderAt("/experiments");
-    await screen.findByRole("heading", { name: "Experiments" });
+    await screen.findByRole("heading", { name: /Experimentos de MLflow en vivo/i });
 
     fireEvent.click(screen.getByRole("link", { name: "Training" }));
 
-    expect(await screen.findByRole("heading", { name: "Training" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Experimentos de MLflow en vivo/i })).toBeInTheDocument();
   });
 });
