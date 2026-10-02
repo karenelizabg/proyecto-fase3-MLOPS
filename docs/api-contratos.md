@@ -31,7 +31,7 @@ expone: es un servicio Python aparte, no una ruta más del backend existente.
 | `/ml-api/training/jobs` | GET | → `TrainingJobList` | Real (lee `training_jobs`) |
 | `/ml-api/training/jobs` | POST | `CreateTrainingJobRequest` → `TrainingJob` (201) | Real (P3-09) — valida y encola en `queued` |
 | `/ml-api/experiments` | GET | `PendingEndpoint` | Pendiente — P3-12 |
-| `/ml-api/evaluation` | GET | `PendingEndpoint` | Pendiente — P3-13 |
+| `/ml-api/evaluation` | GET | `PendingEndpoint` o `EvaluationLocked` | P3-11: bloquea sin `selection.json`; P3-13/P3-15 llenan los datos |
 | `/ml-api/models` | GET | `PendingEndpoint` | Pendiente — P3-14 |
 | `/ml-api/inference` | GET | `PendingEndpoint` | Pendiente — P3-16 |
 
@@ -93,3 +93,61 @@ por qué, mientras esa pieza no existe.
 | `status` | `"pending"` | Constante |
 | `ticket` | `string` | Qué ticket construye el contrato real (ej. `"P3-12"`) |
 | `message` | `string` | Explicación corta para mostrar en la UI |
+
+## Selección y candado (P3-11, #18)
+
+P3-11 no expone endpoints nuevos: produce dos reportes versionados y un candado
+sobre `/ml-api/evaluation`. La lógica vive en `app/selection/` (pura) y los CLIs
+`app/validate_runs.py` / `app/select.py`.
+
+### `reports/experiments_validity.json`
+
+Marca cada corrida de la campaña como válida o no (misma `manifest_sha256` y
+`classes`, `FINISHED`, ≥2 épocas, `git_dirty="false"`, parámetros de rejilla no
+duplicados) y exige ≥10 válidas con ≥2 valores por parámetro.
+
+| Campo | Tipo |
+|---|---|
+| `manifest_sha256` | `string` |
+| `classes` | `object` (`{"0": "cat", "1": "dog"}`) |
+| `min_required` | `int` |
+| `valid` | `string[]` (`run_id`) |
+| `invalid` | `{run_id, grid_row, reasons}`[] |
+| `per_param_values` | `{param: int}` |
+| `passed` | `bool` |
+| `produced_at` | ISO 8601 |
+
+### `reports/selection.json`
+
+Lo leen P3-11, P3-13, P3-14 y P3-15. Su `test_ids_sha256` **sella el test**.
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `run_id` | `string` | Corrida ganadora |
+| `release` | `string` | Release del manifiesto (ej. `"v0.1.1"`) |
+| `manifest_id` | `string` | — |
+| `manifest_sha256` | `string` (64 hex) | — |
+| `checkpoint_sha256` | `string` (64 hex) | Tag de la ganadora en MLflow |
+| `test_ids_sha256` | `string` (64 hex) | SHA-256 de los `crop_id` del split `test`, ordenados |
+| `selected_at` | ISO 8601 | Con zona |
+| `selection_metric` | `"best_val_accuracy"` | Métrica de selección (sección 5) |
+| `candidate` | `{grid_row, best_val_accuracy, best_val_macro_f1, best_val_loss}` | Métricas de la época restaurada |
+
+Además, la ganadora se etiqueta en MLflow con `selected_candidate`, `selected_at`
+y `selection_metric`.
+
+### `EvaluationLocked`
+
+`/ml-api/evaluation` responde esto (200) cuando **no** existe `selection.json` o
+su `test_ids_sha256` no coincide con el manifiesto; cuando la selección está
+cerrada, vuelve a responder `PendingEndpoint` (P3-13).
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `status` | `"selection_not_closed"` | Constante |
+| `ticket` | `"P3-11"` | Constante |
+| `message` | `string` | Motivo: sin selección, `selection.json` inválido, o hash del test distinto |
+
+El candado (`app/selection/lock.py`) lo usa también `final.py` (P3-13): con
+`--split test` exige la selección cerrada y el hash coincidente; con
+`--split validation` está exento (es el ensayo previo al cierre).
