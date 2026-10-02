@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { z } from "zod";
+import { mlApiRequest } from "@/model/api/client";
 import {
   filterValidRuns,
   getMLflowLink,
   type MLflowRun,
   sortByMetric,
 } from "../../lib/experimentsUtils";
-
 import { ExperimentCurves } from "./ExperimentCurves";
 export const ExperimentsTable = ({ experimentId = "0" }) => {
   const [runs, setRuns] = useState<MLflowRun[]>([]);
@@ -14,10 +15,14 @@ export const ExperimentsTable = ({ experimentId = "0" }) => {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`http://127.0.0.1:8100/experiments/${experimentId}/runs`)
-      .then((res) => res.json())
-      .then((data) => setRuns(data))
-      .catch((err) => console.error("Error al cargar corridas:", err));
+    mlApiRequest(`/experiments/${experimentId}/runs`, z.array(z.any()))
+      .then((data) => {
+        setRuns(data);
+      })
+      .catch((err) => {
+        console.error("Error al cargar corridas:", err);
+        setRuns([]);
+      });
   }, [experimentId]);
 
   const displayedRuns = useMemo(() => {
@@ -31,13 +36,13 @@ export const ExperimentsTable = ({ experimentId = "0" }) => {
   const toggleValidStatus = async (runId: string, currentStatus: string | undefined) => {
     const newStatus = currentStatus === "valida" ? "invalida" : "valida";
 
-    const response = await fetch(`http://127.0.0.1:8100/experiments/runs/${runId}/tags`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key: "estado", value: newStatus }),
-    });
+    try {
+      await mlApiRequest(`/experiments/runs/${runId}/tags`, z.any(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "estado", value: newStatus }),
+      });
 
-    if (response.ok) {
       setRuns((prevRuns) =>
         prevRuns.map((run) =>
           run.info.run_id === runId
@@ -45,6 +50,8 @@ export const ExperimentsTable = ({ experimentId = "0" }) => {
             : run
         )
       );
+    } catch (err) {
+      console.error("Error actualizando el estado:", err);
     }
   };
 

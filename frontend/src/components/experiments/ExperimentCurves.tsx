@@ -8,7 +8,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-
+import { ML_API_BASE_URL } from "@/model/api/client";
 export const ExperimentCurves = ({
   runId,
   metricKey = "val_loss",
@@ -21,7 +21,7 @@ export const ExperimentCurves = ({
 
   useEffect(() => {
     setLoading(true);
-    fetch(`http://127.0.0.1:8100/experiments/runs/${runId}/metrics/${metricKey}`)
+    fetch(`${ML_API_BASE_URL}/experiments/runs/${runId}/metrics/${metricKey}`)
       .then((res) => res.json())
       .then((history) => {
         setData(history);

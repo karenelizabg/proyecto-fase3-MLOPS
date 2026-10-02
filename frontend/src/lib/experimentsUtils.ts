@@ -24,5 +24,8 @@ export const sortByMetric = (
 };
 
 export const getMLflowLink = (experimentId: string, runId: string): string => {
-  return `http://localhost:5000/#/experiments/${experimentId}/runs/${runId}`;
+  const base =
+    (import.meta.env.VITE_MLFLOW_URL as string | undefined)?.trim() ||
+    `${window.location.protocol}//${window.location.hostname}:5050`;
+  return `${base}/#/experiments/${experimentId}/runs/${runId}`;
 };

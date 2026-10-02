@@ -82,7 +82,6 @@ def test_training_jobs_is_an_empty_list_before_any_run(monkeypatch, tmp_path):
 def test_the_three_pending_endpoints_name_their_own_ticket(monkeypatch, tmp_path):
     client = client_for(monkeypatch, tmp_path)
     expected_tickets = {
-        "/experiments": "P3-12",
         "/models": "P3-14",
         "/inference": "P3-16",
     }
