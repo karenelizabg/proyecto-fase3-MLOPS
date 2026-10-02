@@ -79,11 +79,10 @@ def test_training_jobs_is_an_empty_list_before_any_run(monkeypatch, tmp_path):
     assert response.json() == {"jobs": []}
 
 
-def test_the_four_pending_endpoints_name_their_own_ticket(monkeypatch, tmp_path):
+def test_the_three_pending_endpoints_name_their_own_ticket(monkeypatch, tmp_path):
     client = client_for(monkeypatch, tmp_path)
     expected_tickets = {
         "/experiments": "P3-12",
-        "/evaluation": "P3-13",
         "/models": "P3-14",
         "/inference": "P3-16",
     }
@@ -94,6 +93,17 @@ def test_the_four_pending_endpoints_name_their_own_ticket(monkeypatch, tmp_path)
         body = response.json()
         assert body["status"] == "pending"
         assert body["ticket"] == ticket
+
+
+def test_evaluation_is_locked_until_selection_is_closed(monkeypatch, tmp_path):
+    # P3-11 (#18): sin reports/selection.json, /evaluation se niega a servir datos.
+    client = client_for(monkeypatch, tmp_path)
+    response = client.get("/evaluation")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "selection_not_closed"
+    assert body["ticket"] == "P3-11"
+    assert "selection" in body["message"]
 
 
 class _RecordingCreateJob:
