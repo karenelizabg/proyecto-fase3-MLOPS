@@ -4,14 +4,15 @@ Las pruebas puras no tocan MLflow; solo `test_read_runs_roundtrip` usa un MLflow
 temporal (SQLite en `tmp_path`), igual patrón que `test_p3_08.py`.
 """
 
-import importlib.util
 import json
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import mlflow
 import pytest
 
+from select_candidate import main as select_main
 from selection.contracts import (
     Candidate,
     ExperimentsValidity,
@@ -30,7 +31,7 @@ from selection.lock import (
 )
 from selection.mlflow_reader import EXPERIMENT, read_runs
 from selection.select import rank_runs, select_candidate
-from selection.validate import validate_runs
+from selection.validate import REQUIRED_ARTIFACTS, validate_runs
 
 MANIFEST_SHA = "a" * 64
 CHECKPOINT_SHA = "b" * 64
@@ -64,6 +65,7 @@ GRID_R02 = {
     "image_size": "160",
     "hidden_layers": "1",
     "dropout": "0.3",
+    "momentum": "0.9",
 }
 
 
@@ -78,6 +80,11 @@ def a_run(
     classes: dict | None = None,
     params: dict | None = None,
     extra_metrics: dict | None = None,
+    tags: dict | None = None,
+    artifacts: list[str] | None = None,
+    drop_params: tuple[str, ...] = (),
+    drop_tags: tuple[str, ...] = (),
+    drop_metrics: tuple[str, ...] = (),
 ) -> RunSummary:
     base_params = {
         **FROZEN_PARAMS,
@@ -96,21 +103,39 @@ def a_run(
         "best_val_loss": 0.2,
         "best_epoch": 4.0,
         "stopped_epoch": stopped_epoch,
+        "duration_s": 12.0,
     }
     metrics.update(extra_metrics or {})
+    base_tags = {
+        "grid_row": grid_row,
+        "run_kind": "campaign",
+        "git_commit": "e082d9c8e06e0d243a1ab2f839857f5cb2a2cd0a",
+        "release": "v0.1.1",
+        "manifest_id": "v0.1.1-test",
+        "manifest_sha256": manifest_sha256,
+        "classes": json.dumps(classes or CLASSES),
+        "git_dirty": git_dirty,
+        "checkpoint_sha256": CHECKPOINT_SHA,
+        "python_version": "3.12.0",
+        "torch_version": "2.14.0",
+        "torchvision_version": "0.29.0",
+        "platform": "macOS-15",
+        "device": "cpu",
+    }
+    base_tags.update(tags or {})
+    for key in drop_params:
+        base_params.pop(key, None)
+    for key in drop_tags:
+        base_tags.pop(key, None)
+    for key in drop_metrics:
+        metrics.pop(key, None)
     return RunSummary(
         run_id=run_id,
         status=status,
         params=base_params,
-        tags={
-            "grid_row": grid_row,
-            "run_kind": "campaign",
-            "manifest_sha256": manifest_sha256,
-            "classes": json.dumps(classes or CLASSES),
-            "git_dirty": git_dirty,
-            "checkpoint_sha256": CHECKPOINT_SHA,
-        },
+        tags=base_tags,
         metrics=metrics,
+        artifacts=artifacts if artifacts is not None else list(REQUIRED_ARTIFACTS),
     )
 
 
@@ -162,27 +187,10 @@ def test_validate_requires_two_values_per_param():
 
 
 def test_validate_passes_full_grid():
-    rows = {
-        "r01": {
-            "optimizer": "adam",
-            "batch_size": "32",
-            "max_epochs": "15",
-            "learning_rate": "0.001",
-            "image_size": "128",
-            "hidden_layers": "0",
-            "dropout": "0.0",
-        },
-        "r02": {
-            "optimizer": "sgd",
-            "batch_size": "16",
-            "max_epochs": "30",
-            "learning_rate": "0.01",
-            "image_size": "160",
-            "hidden_layers": "1",
-            "dropout": "0.3",
-        },
-    }
-    runs = [a_run(f"run-{row}", row, params=params) for row, params in rows.items()]
+    runs = [
+        a_run("run-r01", "r01", params=GRID_R01),
+        a_run("run-r02", "r02", params=GRID_R02),
+    ]
     result = validate_runs(runs, manifest_sha256=MANIFEST_SHA, classes=CLASSES, min_required=2)
     assert result.passed
     assert all(count == 2 for count in result.per_param_values.values())
@@ -399,19 +407,49 @@ def test_validate_rejects_campaign_without_grid_row():
     assert any("grid_row" in reason for entry in result.invalid for reason in entry.reasons)
 
 
-# --- retro PR #53: candado de select.py (cruce de entradas y atomicidad) --------
+# --- sección 8: una corrida a la que le falte algo no cuenta como válida ---------
 
 
-def _load_select_cli():
-    """`select.py` choca con el módulo `select` de la stdlib; se carga por ruta."""
-    path = Path(__file__).resolve().parents[1] / "select.py"
-    spec = importlib.util.spec_from_file_location("p3_11_select_cli", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        pytest.param({"drop_tags": ["checkpoint_sha256"]}, id="tag-checkpoint"),
+        pytest.param({"drop_tags": ["device"]}, id="tag-device"),
+        pytest.param({"drop_tags": ["torch_version"]}, id="tag-torch"),
+        pytest.param({"drop_tags": ["platform"]}, id="tag-platform"),
+        pytest.param({"drop_tags": ["release"]}, id="tag-release"),
+        pytest.param({"drop_tags": ["manifest_id"]}, id="tag-manifest-id"),
+        pytest.param({"drop_tags": ["git_commit"]}, id="tag-git-commit"),
+        pytest.param({"drop_tags": ["python_version"]}, id="tag-python"),
+        pytest.param({"drop_params": ["learning_rate"]}, id="param-rejilla"),
+        pytest.param({"drop_params": ["seed_aug"]}, id="param-semilla"),
+        pytest.param({"drop_params": ["patience"]}, id="param-patience"),
+        pytest.param({"drop_params": ["min_delta"]}, id="param-min-delta"),
+        pytest.param({"drop_metrics": ["best_val_macro_f1"]}, id="metrica-final"),
+        pytest.param({"drop_metrics": ["duration_s"]}, id="metrica-duracion"),
+        pytest.param({"artifacts": ["curves.csv"]}, id="artefacto-checkpoint"),
+        pytest.param({"artifacts": ["checkpoint/best.pt"]}, id="artefacto-curvas"),
+        pytest.param({"extra_metrics": {"test_accuracy": 0.9}}, id="metrica-test"),
+    ],
+)
+def test_validate_rejects_missing_contract_pieces(kwargs):
+    result = validate_runs(
+        [a_run(**kwargs)], manifest_sha256=MANIFEST_SHA, classes=CLASSES, min_required=1
+    )
+    assert result.valid == []
+    assert result.invalid[0].reasons
 
 
-select_cli = _load_select_cli()
+def test_validate_requires_momentum_for_sgd():
+    params = {key: value for key, value in GRID_R02.items() if key != "momentum"}
+    result = validate_runs(
+        [a_run(params=params)], manifest_sha256=MANIFEST_SHA, classes=CLASSES, min_required=1
+    )
+    assert result.valid == []
+    assert any("momentum" in reason for entry in result.invalid for reason in entry.reasons)
+
+
+# --- retro PR #53: candado de select_candidate.py (cruce de entradas y atomicidad) ---
 
 
 @pytest.fixture
@@ -500,7 +538,7 @@ def test_select_refuses_when_validity_manifest_differs(tmp_path):
         manifest_sha256=other,
     )
     out = tmp_path / "selection.json"
-    rc = select_cli.main(
+    rc = select_main(
         select_argv("sqlite:///unused.db", meta=meta, manifest=manifest, validity=validity, out=out)
     )
     assert rc == 3
@@ -525,7 +563,7 @@ def test_select_refuses_when_csv_is_not_the_manifest(tmp_path):
     wrong_csv = tmp_path / "wrong.csv"
     write_manifest(wrong_csv, ["x", "y", "z"])
     out = tmp_path / "selection.json"
-    rc = select_cli.main(
+    rc = select_main(
         select_argv(
             "sqlite:///unused.db", meta=meta, manifest=wrong_csv, validity=validity, out=out
         )
@@ -556,14 +594,14 @@ def test_select_writes_file_then_tags_and_is_idempotent(tmp_path, mlflow_uri):
     out = tmp_path / "selection.json"
     argv = select_argv(mlflow_uri, meta=meta, manifest=manifest, validity=validity, out=out)
 
-    assert select_cli.main(argv) == 0
+    assert select_main(argv) == 0
     selection = Selection.model_validate_json(out.read_text(encoding="utf-8"))
     assert selection.run_id in {first, second}
     assert mlflow.get_run(selection.run_id).data.tags["selected_candidate"] == "true"
 
     # Re-ejecutar con la misma selección es idempotente y conserva el archivo.
     before = out.read_text(encoding="utf-8")
-    assert select_cli.main(argv) == 0
+    assert select_main(argv) == 0
     assert out.read_text(encoding="utf-8") == before
 
 
@@ -590,8 +628,20 @@ def test_select_refuses_when_another_run_is_already_selected(tmp_path, mlflow_ur
         manifest_sha256=sha,
     )
     out = tmp_path / "selection.json"
-    rc = select_cli.main(
+    rc = select_main(
         select_argv(mlflow_uri, meta=meta, manifest=manifest, validity=validity, out=out)
     )
     assert rc == 4
     assert not out.exists()
+
+
+def test_no_root_module_shadows_a_stdlib_module():
+    """Un .py en la raíz de app/ no puede llamarse igual que un módulo de la stdlib.
+
+    `select.py` (antes) chocaba con `select` de la stdlib; por eso el CLI se llama
+    `select_candidate.py`.
+    """
+    root = Path(__file__).resolve().parents[1]
+    stdlib = set(sys.stdlib_module_names)
+    offenders = sorted(path.stem for path in root.glob("*.py") if path.stem in stdlib)
+    assert offenders == [], f"Módulos de la raíz que chocan con la stdlib: {offenders}"

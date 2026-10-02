@@ -11,7 +11,7 @@ import json
 from datetime import datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Los 7 parámetros que varían por fila de la rejilla (sección 7 de
 # docs/decisiones-proyecto3.md). La validación exige ≥2 valores por parámetro.
@@ -42,6 +42,7 @@ class RunSummary(ContractModel):
     params: dict[str, str]
     tags: dict[str, str]
     metrics: dict[str, float]
+    artifacts: list[str] = Field(default_factory=list)
 
     @property
     def grid_row(self) -> str:

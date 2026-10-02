@@ -11,6 +11,17 @@ from selection.contracts import RunSummary
 EXPERIMENT = "clasificador-perro-gato"
 
 
+def _artifact_paths(client: MlflowClient, run_id: str, path: str | None = None) -> list[str]:
+    """Rutas de todos los archivos del run; `list_artifacts` no es recursivo aquí."""
+    paths: list[str] = []
+    for info in client.list_artifacts(run_id, path):
+        if info.is_dir:
+            paths.extend(_artifact_paths(client, run_id, info.path))
+        else:
+            paths.append(info.path)
+    return paths
+
+
 def read_runs(
     tracking_uri: str, *, run_kind: str = "campaign", experiment: str = EXPERIMENT
 ) -> list[RunSummary]:
@@ -29,6 +40,7 @@ def read_runs(
             params=dict(run.data.params),
             tags=dict(run.data.tags),
             metrics=dict(run.data.metrics),
+            artifacts=_artifact_paths(client, run.info.run_id),
         )
         for run in runs
     ]
