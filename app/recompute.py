@@ -5,9 +5,8 @@ comprobar que las cifras de `metrics.json` son correctas.
 
 Uso (desde la raíz del repo, con el venv de `app/`):
 
-    app/.venv/bin/python recompute.py \\
-        --predictions reports/evaluation/predictions.csv \\
-        --metrics reports/evaluation/metrics.json
+    app/.venv/bin/python recompute.py   # usa reports/evaluation/{predictions.csv,metrics.json}
+    app/.venv/bin/python recompute.py --predictions <csv> --metrics <json>
 """
 
 import argparse
@@ -27,6 +26,9 @@ from sklearn.metrics import (
 from evaluation.contracts import CLASSES
 
 TOLERANCE = 1e-9
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_PREDICTIONS = REPO_ROOT / "reports" / "evaluation" / "predictions.csv"
+DEFAULT_METRICS = REPO_ROOT / "reports" / "evaluation" / "metrics.json"
 
 
 def sklearn_metrics(
@@ -59,7 +61,8 @@ def sklearn_metrics(
 def read_predictions(path: Path) -> tuple[list[int], list[int]]:
     true_labels: list[int] = []
     predicted_labels: list[int] = []
-    with path.open(newline="", encoding="utf-8") as handle:
+    # Ruta de CLI local (la elige quien corre recompute); NOSONAR para S8707.
+    with path.open(newline="", encoding="utf-8") as handle:  # NOSONAR
         for row in csv.DictReader(handle):
             true_labels.append(CLASSES.index(row["true_class"]))
             predicted_labels.append(CLASSES.index(row["predicted_class"]))
@@ -90,13 +93,16 @@ def compare(expected: dict, got: dict) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--predictions", type=Path, required=True)
-    parser.add_argument("--metrics", type=Path, required=True)
+    parser.add_argument("--predictions", type=Path, help=f"Por defecto, {DEFAULT_PREDICTIONS}.")
+    parser.add_argument("--metrics", type=Path, help=f"Por defecto, {DEFAULT_METRICS}.")
     args = parser.parse_args(argv)
 
-    true_labels, predicted_labels = read_predictions(args.predictions)
+    predictions_path = args.predictions or DEFAULT_PREDICTIONS
+    metrics_path = args.metrics or DEFAULT_METRICS
+    true_labels, predicted_labels = read_predictions(predictions_path)
     got = sklearn_metrics(true_labels, predicted_labels)
-    expected = json.loads(args.metrics.read_text(encoding="utf-8"))
+    # NOSONAR para S8707 (path traversal): ruta de CLI local.
+    expected = json.loads(metrics_path.read_text(encoding="utf-8"))  # NOSONAR
     differences = compare(expected, got)
 
     print(json.dumps({"accuracy": got["accuracy"], "macro_f1": got["macro_f1"]}, indent=2))
