@@ -42,7 +42,7 @@ def test_list_experiments_returns_id_and_name(monkeypatch, tmp_path):
     ]
 
 
-def test_list_experiments_is_404_when_mlflow_fails(monkeypatch, tmp_path):
+def test_list_experiments_is_502_when_mlflow_fails(monkeypatch, tmp_path):
     class _BrokenClient:
         def search_experiments(self):
             raise RuntimeError("MLflow caído")
@@ -53,4 +53,4 @@ def test_list_experiments_is_404_when_mlflow_fails(monkeypatch, tmp_path):
     )
     response = TestClient(create_app(settings)).get("/experiments")
 
-    assert response.status_code == 404
+    assert response.status_code == 502
