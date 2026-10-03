@@ -69,14 +69,17 @@ ModelPackageInfoOf = Callable[[ModelEntry], dict | None]
 
 
 def _default_model_status_of(entry: ModelEntry) -> dict | None:
-    """`head-object` en vivo (P3-15) contra el bucket del `s3_path` de P3-14."""
+    """`head-object` en vivo (P3-15) contra el bucket del `s3_path` de P3-14,
+    pidiendo el `VersionId` registrado (no la última versión de la key)."""
     bucket, key = split_s3_path(entry.s3_path)
-    return head_object(get_model_s3_client(), bucket=bucket, key=key)
+    return head_object(get_model_s3_client(), bucket=bucket, key=key, version_id=entry.VersionId)
 
 
 def _default_model_download_url_of(entry: ModelEntry) -> str | None:
     bucket, key = split_s3_path(entry.s3_path)
-    return presigned_get_url(get_model_s3_client(), bucket=bucket, key=key)
+    return presigned_get_url(
+        get_model_s3_client(), bucket=bucket, key=key, version_id=entry.VersionId
+    )
 
 
 # La tarjeta y el package.json viajan dentro del `.tar.gz`; descargarlo en cada
@@ -89,7 +92,7 @@ def _default_model_package_info_of(entry: ModelEntry) -> dict | None:
     cache_key = f"{bucket}/{key}#{entry.VersionId}"
     if cache_key not in _package_info_cache:
         _package_info_cache[cache_key] = read_package_info(
-            get_model_s3_client(), bucket=bucket, key=key
+            get_model_s3_client(), bucket=bucket, key=key, version_id=entry.VersionId
         )
     return _package_info_cache[cache_key]
 

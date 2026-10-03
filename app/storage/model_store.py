@@ -5,9 +5,12 @@ sección 9) vive en AWS y se accede con el perfil SSO del equipo. Igual que
 `object_store.py` para MinIO, este es el único lugar autorizado a crear clientes
 `boto3`; `ml-api` lo consume a través de callables inyectados, nunca importa
 `boto3` directo.
+
+Todas las operaciones aceptan `version_id`: el registry de P3-14 guarda el
+`VersionId` con el que se publicó cada paquete, y si la misma key se republica
+hay que leer/descargar exactamente esa versión, no la última.
 """
 
-import io
 import json
 import tarfile
 
@@ -35,10 +38,13 @@ def get_model_s3_client():
     )
 
 
-def head_object(client, *, bucket: str, key: str) -> dict | None:
+def head_object(client, *, bucket: str, key: str, version_id: str | None = None) -> dict | None:
     """Estado en vivo (`head-object`); `None` si el objeto no existe."""
+    kwargs = {"Bucket": bucket, "Key": key}
+    if version_id is not None:
+        kwargs["VersionId"] = version_id
     try:
-        stat = client.head_object(Bucket=bucket, Key=key)
+        stat = client.head_object(**kwargs)
     except ClientError as error:
         if error.response.get("Error", {}).get("Code") in _MISSING_CODES:
             return None
@@ -50,31 +56,43 @@ def head_object(client, *, bucket: str, key: str) -> dict | None:
     }
 
 
-def presigned_get_url(client, *, bucket: str, key: str, expires_seconds: int = 3600) -> str:
+def presigned_get_url(
+    client,
+    *,
+    bucket: str,
+    key: str,
+    version_id: str | None = None,
+    expires_seconds: int = 3600,
+) -> str:
     """URL prefirmada de descarga. El bucket es privado: sin firma no se baja."""
-    return client.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": bucket, "Key": key},
-        ExpiresIn=expires_seconds,
-    )
+    params = {"Bucket": bucket, "Key": key}
+    if version_id is not None:
+        params["VersionId"] = version_id
+    return client.generate_presigned_url("get_object", Params=params, ExpiresIn=expires_seconds)
 
 
-def read_package_info(client, *, bucket: str, key: str) -> dict:
+def read_package_info(client, *, bucket: str, key: str, version_id: str | None = None) -> dict:
     """Lee `model_card.md` y `package.json` de dentro del `.tar.gz` publicado.
 
     P3-14 empaqueta la tarjeta y el `package.json` (con `manifest_id` y
     `run_kind`) *dentro* del paquete; el registry no los repite. `card` es la
     tarjeta en texto; si al paquete le falta algo, el campo queda en `None` en
     vez de tumbar la página.
+
+    Se lee en streaming (`r|gz`) sobre el `Body` de `get_object`: nunca se
+    materializa el `.tar.gz` completo en memoria.
     """
-    body = client.get_object(Bucket=bucket, Key=key)["Body"].read()
+    kwargs = {"Bucket": bucket, "Key": key}
+    if version_id is not None:
+        kwargs["VersionId"] = version_id
+    stream = client.get_object(**kwargs)["Body"]
     info: dict = {"card": None, "run_kind": None, "manifest_id": None}
-    with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as tar:
-        members = set(tar.getnames())
-        if "model_card.md" in members:
-            info["card"] = tar.extractfile("model_card.md").read().decode("utf-8")
-        if "package.json" in members:
-            package = json.loads(tar.extractfile("package.json").read().decode("utf-8"))
-            info["run_kind"] = package.get("run_kind")
-            info["manifest_id"] = package.get("manifest_id")
+    with tarfile.open(fileobj=stream, mode="r|gz") as tar:
+        for member in tar:
+            if member.name == "model_card.md":
+                info["card"] = tar.extractfile(member).read().decode("utf-8")
+            elif member.name == "package.json":
+                package = json.loads(tar.extractfile(member).read().decode("utf-8"))
+                info["run_kind"] = package.get("run_kind")
+                info["manifest_id"] = package.get("manifest_id")
     return info

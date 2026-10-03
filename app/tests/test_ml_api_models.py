@@ -202,30 +202,34 @@ def test_setting_active_version_rejects_an_unknown_version_and_bad_body(monkeypa
 # --- storage/model_store (P3-15) --------------------------------------------
 
 
-class _Body:
-    def __init__(self, data: bytes) -> None:
-        self._data = data
-
-    def read(self) -> bytes:
-        return self._data
-
-
 class _FakeS3:
+    """Cliente S3 falso que registra con qué `VersionId` se pidió cada objeto."""
+
     def __init__(self, *, stat=None, missing: bool = False, body: bytes = b"") -> None:
         self._stat = stat
         self._missing = missing
         self._body = body
+        self.head_kwargs: dict | None = None
+        self.get_kwargs: dict | None = None
+        self.presign_params: dict | None = None
 
-    def head_object(self, Bucket, Key):
+    def head_object(self, Bucket, Key, VersionId=None):
+        self.head_kwargs = {"Bucket": Bucket, "Key": Key}
+        if VersionId is not None:
+            self.head_kwargs["VersionId"] = VersionId
         if self._missing:
             raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
         return self._stat
 
     def generate_presigned_url(self, operation, Params, ExpiresIn):
+        self.presign_params = dict(Params)
         return f"https://signed/{Params['Bucket']}/{Params['Key']}?op={operation}&exp={ExpiresIn}"
 
-    def get_object(self, Bucket, Key):
-        return {"Body": _Body(self._body)}
+    def get_object(self, Bucket, Key, VersionId=None):
+        self.get_kwargs = {"Bucket": Bucket, "Key": Key}
+        if VersionId is not None:
+            self.get_kwargs["VersionId"] = VersionId
+        return {"Body": io.BytesIO(self._body)}
 
 
 def a_package_tar() -> bytes:
@@ -242,28 +246,44 @@ def a_package_tar() -> bytes:
     return buffer.getvalue()
 
 
-def test_head_object_reads_live_status():
+def test_head_object_reads_live_status_and_pins_the_version_id():
     stat = {"VersionId": "v-1", "ContentLength": 2048, "LastModified": LAST_MODIFIED}
+    client = _FakeS3(stat=stat)
 
-    status = head_object(_FakeS3(stat=stat), bucket="b", key="k")
+    status = head_object(client, bucket="b", key="k", version_id="v-1")
 
     assert status == {"version_id": "v-1", "size_bytes": 2048, "last_modified": LAST_MODIFIED}
+    assert client.head_kwargs == {"Bucket": "b", "Key": "k", "VersionId": "v-1"}
+
+
+def test_head_object_omits_version_id_when_not_given():
+    client = _FakeS3(stat={"VersionId": "v-1"})
+
+    head_object(client, bucket="b", key="k")
+
+    assert client.head_kwargs == {"Bucket": "b", "Key": "k"}
 
 
 def test_head_object_returns_none_when_missing():
     assert head_object(_FakeS3(missing=True), bucket="b", key="k") is None
 
 
-def test_presigned_get_url_signs_the_object():
-    url = presigned_get_url(_FakeS3(), bucket="b", key="k", expires_seconds=60)
+def test_presigned_get_url_pins_the_version_id():
+    client = _FakeS3()
+
+    url = presigned_get_url(client, bucket="b", key="k", version_id="v-1", expires_seconds=60)
 
     assert url == "https://signed/b/k?op=get_object&exp=60"
+    assert client.presign_params == {"Bucket": "b", "Key": "k", "VersionId": "v-1"}
 
 
-def test_read_package_info_extracts_card_and_package_json():
-    info = read_package_info(_FakeS3(body=a_package_tar()), bucket="b", key="k")
+def test_read_package_info_extracts_card_and_package_json_in_streaming():
+    client = _FakeS3(body=a_package_tar())
+
+    info = read_package_info(client, bucket="b", key="k", version_id="v-1")
 
     assert info == {"card": "# Tarjeta\n", "run_kind": "smoke", "manifest_id": "m-1"}
+    assert client.get_kwargs == {"Bucket": "b", "Key": "k", "VersionId": "v-1"}
 
 
 def test_read_package_info_tolerates_a_package_without_optional_files():

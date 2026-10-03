@@ -261,8 +261,9 @@ services:
       - ./reports:/app/reports:ro
       # P3-15: catálogo de P3-14 (lectura) + `active_version.json` (escritura).
       - ./models:/app/models
-      # Solo lectura: el perfil SSO para el head-object y la URL prefirmada.
-      - ~/.aws:/home/appuser/.aws:ro
+      # Lectura/escritura: botocore refresca el token SSO en ~/.aws/sso/cache;
+      # con :ro falla con "Read-only file system" al hacer head-object.
+      - ~/.aws:/home/appuser/.aws
     restart: on-failure:5
 
 volumes:
