@@ -10,6 +10,26 @@ def get_client() -> MlflowClient:
     return MlflowClient()
 
 
+async def list_experiments(_: Request) -> JSONResponse:
+    """Experimentos de MLflow (P3-12/P3-15): la UI resuelve el experimento por
+    nombre (`clasificador-perro-gato`) en vez de fijar el id a mano."""
+    client = get_client()
+    try:
+        experiments = client.search_experiments()
+        return JSONResponse(
+            [
+                {
+                    "experiment_id": experiment.experiment_id,
+                    "name": experiment.name,
+                    "lifecycle_stage": experiment.lifecycle_stage,
+                }
+                for experiment in experiments
+            ]
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=404)
+
+
 async def list_runs(request: Request) -> JSONResponse:
     experiment_id = request.path_params["experiment_id"]
     client = get_client()

@@ -1,46 +1,70 @@
 import { describe, expect, it } from "vitest";
 
-type MLflowRun = {
-  info: { run_id: string; experiment_id: string };
-  data: {
-    metrics: Record<string, number>;
-    tags: Record<string, string>;
+import {
+  filterCampaign,
+  filterValid,
+  getMLflowLink,
+  isCampaignRun,
+  type MLflowRun,
+  sortByMetric,
+} from "../lib/experimentsUtils";
+
+describe("Lógica de la Tabla de Experimentos (P3-12/P3-15)", () => {
+  const campaignRun = (gridRow: string, runId: string): MLflowRun => ({
+    info: { run_id: runId, experiment_id: "1" },
+    data: { metrics: { best_val_loss: 0.5 }, tags: { run_kind: "campaign", grid_row: gridRow } },
+  });
+
+  const smoke: MLflowRun = {
+    info: { run_id: "smoke", experiment_id: "1" },
+    data: { metrics: { best_val_loss: 0.1 }, tags: { run_kind: "smoke", grid_row: "" } },
   };
-};
 
-import { filterValidRuns, getMLflowLink, sortByMetric } from "../lib/experimentsUtils";
-
-describe("Lógica de la Tabla de Experimentos (P3-12)", () => {
   const mockRuns: MLflowRun[] = [
-    {
-      info: { run_id: "abc", experiment_id: "0" },
-      data: { metrics: { best_val_loss: 0.5 }, tags: { estado: "valida" } },
-    },
-    {
-      info: { run_id: "def", experiment_id: "0" },
-      data: { metrics: { best_val_loss: 0.2 }, tags: { estado: "invalida" } },
-    },
-    {
-      info: { run_id: "ghi", experiment_id: "0" },
-      data: { metrics: { best_val_loss: 0.8 }, tags: {} }, // Sin etiqueta
-    },
+    campaignRun("r01", "abc"),
+    smoke,
+    campaignRun("r02", "def"),
+    { info: { run_id: "ghi", experiment_id: "1" }, data: { metrics: {}, tags: {} } },
   ];
 
-  it("debe filtrar solo las corridas marcadas como válidas", () => {
-    const validRuns = filterValidRuns(mockRuns);
-    expect(validRuns).toHaveLength(1);
-    expect(validRuns[0]?.info.run_id).toBe("abc");
+  it("reconoce una corrida de campaña por run_kind o por grid_row", () => {
+    expect(isCampaignRun(campaignRun("r10", "x"))).toBe(true);
+    expect(isCampaignRun(smoke)).toBe(false);
+    expect(
+      isCampaignRun({
+        info: { run_id: "y", experiment_id: "1" },
+        data: { metrics: {}, tags: { grid_row: "r12" } },
+      })
+    ).toBe(true);
   });
 
-  it("debe ordenar las corridas por best_val_loss de menor a mayor", () => {
-    const sorted = sortByMetric(mockRuns, "best_val_loss", "asc");
-    expect(sorted[0]?.info.run_id).toBe("def");
-    expect(sorted[1]?.info.run_id).toBe("abc");
-    expect(sorted[2]?.info.run_id).toBe("ghi");
+  it("filtra solo las corridas de la campaña (r01–r12), sin el smoke", () => {
+    const campaign = filterCampaign(mockRuns);
+    expect(campaign.map((run) => run.info.run_id)).toEqual(["abc", "def"]);
   });
 
-  it("debe construir el enlace profundo exacto a la UI de MLflow", () => {
-    const link = getMLflowLink("0", "abc");
-    expect(link).toBe("http://localhost:5050/#/experiments/0/runs/abc");
+  it("filtra por los run_id válidos de reports/experiments_validity.json", () => {
+    const valid = filterValid(mockRuns, new Set(["abc", "ghi"]));
+    expect(valid.map((run) => run.info.run_id)).toEqual(["abc", "ghi"]);
+  });
+
+  it("ordena las corridas por best_val_loss", () => {
+    const runs: MLflowRun[] = [
+      {
+        info: { run_id: "slow", experiment_id: "1" },
+        data: { metrics: { best_val_loss: 0.8 }, tags: {} },
+      },
+      {
+        info: { run_id: "fast", experiment_id: "1" },
+        data: { metrics: { best_val_loss: 0.2 }, tags: {} },
+      },
+    ];
+
+    expect(sortByMetric(runs, "best_val_loss", "asc")[0]?.info.run_id).toBe("fast");
+    expect(sortByMetric(runs, "best_val_loss", "desc")[0]?.info.run_id).toBe("slow");
+  });
+
+  it("construye el enlace profundo exacto a la UI de MLflow", () => {
+    expect(getMLflowLink("1", "abc")).toBe("http://localhost:5050/#/experiments/1/runs/abc");
   });
 });
