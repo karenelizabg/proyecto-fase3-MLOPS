@@ -17,7 +17,7 @@ from pathlib import Path
 
 from mlflow_dump import ROOT, artifacts_dir, load_run
 
-SELECTION = ROOT / "reports" / "selection.json"
+REPORTS = ROOT / "reports"
 
 
 def read_json(path: Path) -> dict:
@@ -37,16 +37,18 @@ def f4(value) -> str:
     return f"{value:.4f}" if isinstance(value, float) else str(value)
 
 
-def build_card(run_id: str, version: str) -> str:
+def build_card(run_id: str, version: str, reports: Path = REPORTS) -> str:
     run = load_run(run_id)
     params, tags, metrics = run["params"], run["tags"], run["metrics"]
     src = f"el run {run_id}"
 
-    selection = read_json(SELECTION)
+    selection = read_json(reports / "selection.json")
     selected_id = need(selection, "run_id", "selection.json")
     selected = selected_id == run_id
     if int(version.split(".")[0]) >= 1 and not selected:
-        sys.exit(f"La versión {version} debe ser el modelo seleccionado ({selected_id}), no {run_id}.")
+        sys.exit(
+            f"La versión {version} debe ser el modelo seleccionado ({selected_id}), no {run_id}."
+        )
 
     release = need(tags, "release", src)
     manifest_id = need(tags, "manifest_id", src)
@@ -61,21 +63,31 @@ def build_card(run_id: str, version: str) -> str:
                 sys.exit(f"selection.json y el run no coinciden en '{key}'.")
         candidate = need(selection, "candidate", "selection.json")
         status = (
-            f"**Seleccionada.** Métrica de selección `{need(selection, 'selection_metric', 'selection.json')}`, "
+            f"**Seleccionada.** Métrica de selección "
+            f"`{need(selection, 'selection_metric', 'selection.json')}`, "
             f"fila `{need(candidate, 'grid_row', 'selection.json')}`, "
             f"seleccionada el {need(selection, 'selected_at', 'selection.json')}."
         )
     else:
         label = "Ensayo, no seleccionada" if run_kind == "smoke" else "No seleccionada"
-        status = f"**{label}** (run_kind `{run_kind}`). El modelo seleccionado es el run `{selected_id}`."
+        status = (
+            f"**{label}** (run_kind `{run_kind}`). "
+            f"El modelo seleccionado es el run `{selected_id}`."
+        )
 
-    counts = read_json(ROOT / "reports" / "manifests" / release / "counts.json")
+    counts = read_json(reports / "manifests" / release / "counts.json")
     if counts.get("release") != release:
         sys.exit(f"counts.json no es del release {release}.")
     totals = need(counts, "totals", "counts.json")
     splits = need(counts, "splits", "counts.json")
 
-    val_keys = ("best_val_accuracy", "best_val_macro_f1", "best_val_loss", "best_epoch", "stopped_epoch")
+    val_keys = (
+        "best_val_accuracy",
+        "best_val_macro_f1",
+        "best_val_loss",
+        "best_epoch",
+        "stopped_epoch",
+    )
     val = {key: need(metrics, key, src) for key in val_keys}
 
     out: list[str] = [f"# Tarjeta de modelo - versión {version}", "", f"> {status}", ""]
@@ -83,7 +95,8 @@ def build_card(run_id: str, version: str) -> str:
     out += [
         "## Identificación",
         f"- Versión del paquete: `{version}`",
-        f"- Run de MLflow: `{run_id}` (`{need(tags, 'mlflow.runName', src)}`, run_kind `{run_kind}`)",
+        f"- Run de MLflow: `{run_id}` "
+        f"(`{need(tags, 'mlflow.runName', src)}`, run_kind `{run_kind}`)",
         "",
         "## Propósito",
         f"Clasificar recortes de imagen en {len(class_names)} clases ({', '.join(class_names)}), "
@@ -120,9 +133,11 @@ def build_card(run_id: str, version: str) -> str:
     ]
 
     limitations = [
-        f"Solo reconoce {len(class_names)} clases ({', '.join(class_names)}); cualquier otra imagen "
+        f"Solo reconoce {len(class_names)} clases ({', '.join(class_names)}); "
+        f"cualquier otra imagen "
         "se asignará a una de ellas.",
-        f"Se entrenó y evaluó sobre recortes del manifiesto `{manifest_id}`, no sobre imágenes completas; "
+        f"Se entrenó y evaluó sobre recortes del manifiesto `{manifest_id}`, "
+        f"no sobre imágenes completas; "
         "la entrada debe prepararse igual (ver `preprocess.json`).",
     ]
 
@@ -139,7 +154,8 @@ def build_card(run_id: str, version: str) -> str:
             "| Clase | Precision | Recall | F1 | Soporte |",
             "|---|---|---|---|---|",
             *[
-                f"| {c} | {f4(m['precision'])} | {f4(m['recall'])} | {f4(m['f1'])} | {m['support']} |"
+                f"| {c} | {f4(m['precision'])} | {f4(m['recall'])} | "
+                f"{f4(m['f1'])} | {m['support']} |"
                 for c, m in test["per_class"].items()
             ],
             "",
@@ -154,12 +170,15 @@ def build_card(run_id: str, version: str) -> str:
         ]
         worst = analysis["most_confused_class"]
         limitations += [
-            f"El test tiene {test['total']} recortes ({splits['test']['originals']} imágenes originales): "
+            f"El test tiene {test['total']} recortes "
+            f"({splits['test']['originals']} imágenes originales): "
             f"cada error cambia la accuracy {100 / test['total']:.1f} puntos.",
             f"Clase con menor recall: `{worst}` ({f4(analysis['recall_per_class'][worst])}). "
-            f"Accuracy de predecir siempre la clase mayoritaria: {f4(analysis['baseline_majority_accuracy'])}.",
+            f"Accuracy de predecir siempre la clase mayoritaria: "
+            f"{f4(analysis['baseline_majority_accuracy'])}.",
             *[
-                f"Error en test: recorte `{e['crop_id']}` ({e['true_class']} -> {e['predicted_class']}, "
+                f"Error en test: recorte `{e['crop_id']}` "
+                f"({e['true_class']} -> {e['predicted_class']}, "
                 f"probabilidad {e['probability']:.3f})."
                 for e in analysis["errors"]
             ],
@@ -168,18 +187,23 @@ def build_card(run_id: str, version: str) -> str:
             limitations.append("La accuracy oculta un recall bajo en al menos una clase.")
     else:
         out.append(
-            f"No evaluada en test: el split de test es exclusivo del modelo seleccionado (run `{selected_id}`)."
+            f"No evaluada en test: el split de test es exclusivo del modelo seleccionado "
+            f"(run `{selected_id}`)."
         )
         limitations += [
-            f"Sin evaluación en test: solo hay métricas de validación ({splits['val']['crops']} recortes).",
+            f"Sin evaluación en test: solo hay métricas de validación "
+            f"({splits['val']['crops']} recortes).",
             f"Se detuvo por early stopping en la época {val['stopped_epoch']}; "
             f"los pesos son de la época {val['best_epoch']}.",
         ]
 
     limitations += [
-        f"Entrenado en `{need(tags, 'device', src)}` sobre `{need(tags, 'platform', src)}` con Python "
-        f"{need(tags, 'python_version', src)}, torch {need(tags, 'torch_version', src)} y torchvision "
-        f"{need(tags, 'torchvision_version', src)}; en otro entorno puede haber diferencias numéricas mínimas.",
+        f"Entrenado en `{need(tags, 'device', src)}` sobre `{need(tags, 'platform', src)}` "
+        f"con Python "
+        f"{need(tags, 'python_version', src)}, torch {need(tags, 'torch_version', src)} "
+        f"y torchvision "
+        f"{need(tags, 'torchvision_version', src)}; "
+        f"en otro entorno puede haber diferencias numéricas mínimas.",
         "`build_model` descarga los pesos ImageNet de torchvision al construir el modelo: "
         "la carga necesita red o la caché de torch.",
     ]
@@ -198,7 +222,8 @@ def build_card(run_id: str, version: str) -> str:
         f"- Archivo: `artifacts/checkpoint/best.pt` del run `{run_id}` "
         f"(mejor época {val['best_epoch']} según validación)",
         f"- SHA-256 del checkpoint: `{ckpt_sha}`",
-        f"- Código: commit `{need(tags, 'git_commit', src)}` (git_dirty `{need(tags, 'git_dirty', src)}`)",
+        f"- Código: commit `{need(tags, 'git_commit', src)}` "
+        f"(git_dirty `{need(tags, 'git_dirty', src)}`)",
         "",
         "## Modo de carga",
         "Desde la carpeta extraída del paquete, con `app/` del repo en el `PYTHONPATH`:",
@@ -215,7 +240,8 @@ def build_card(run_id: str, version: str) -> str:
         'model.load_state_dict(torch.load("artifacts/checkpoint/best.pt", weights_only=True))',
         "model.eval()",
         "",
-        'transform = get_preprocessing_transforms("test", config.image_size)  # descrita en preprocess.json',
+        "transform = get_preprocessing_transforms("
+        '"test", config.image_size)  # descrita en preprocess.json',
         'class_map = json.load(open("class_map.json"))',
         "# probs = torch.softmax(model(transform(img).unsqueeze(0)), dim=1)",
         "# clase = class_map[str(int(probs.argmax()))]",
@@ -234,11 +260,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--run-id", required=True)
     p.add_argument("--version", required=True)
     p.add_argument("--output", type=Path)
+    p.add_argument("--reports-dir", type=Path, default=REPORTS)
     args = p.parse_args(argv)
 
     output = args.output or ROOT / "build" / f"model_card_{args.version}.md"
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(build_card(args.run_id, args.version), encoding="utf-8")
+    output.write_text(build_card(args.run_id, args.version, args.reports_dir), encoding="utf-8")
     print(f"Tarjeta v{args.version} escrita en {output}")
     return 0
 

@@ -31,3 +31,11 @@ reports/.quality_gate.passed
 mlruns/
 mlflow-store/
 data/derived/
+
+# P3-14: paquetes de modelo, extracciones de recarga y salidas locales de verificación
+# (se regeneran con publish.py / verify_reload.py / recarga_limpia.py).
+dist/
+build/
+eval_v*/
+ref_010.csv
+recarga_*.txt

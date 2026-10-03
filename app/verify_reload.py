@@ -1,8 +1,10 @@
-import json
 import hashlib
+import json
 import tarfile
-import boto3
 from pathlib import Path
+
+import boto3
+
 
 def calculate_sha256(filepath: Path) -> str:
     """Calcula el hash SHA-256 de un archivo."""
@@ -11,6 +13,7 @@ def calculate_sha256(filepath: Path) -> str:
         for byte_block in iter(lambda: f.read(4096), b""):
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
+
 
 def verify_and_generate_evidence():
     registry_path = Path("models/registry.json")
@@ -29,14 +32,16 @@ def verify_and_generate_evidence():
     evidence_path = docs_dir / "evidencia-recarga.md"
 
     evidence_md = "# Evidencia de Recarga Limpia y Verificación\n\n"
-    evidence_md += "Este documento contiene la validación de los artefactos descargados desde S3, garantizando su integridad mediante SHA-256 y VersionId.\n\n"
+    evidence_md += (
+        "Este documento contiene la validación de los artefactos descargados desde S3, "
+        "garantizando su integridad mediante SHA-256 y VersionId.\n\n"
+    )
 
     for version, data in registry.items():
         print(f"Verificando versión {version}...")
         s3_path = data["s3_path"]
         expected_sha = data["sha256"]
         version_id = data.get("VersionId")
-
 
         path_parts = s3_path.replace("s3://", "").split("/")
         bucket = path_parts[0]
@@ -47,7 +52,9 @@ def verify_and_generate_evidence():
 
         print(f"  Descargando desde S3 (VersionId: {version_id})...")
         try:
-            extra_args = {"VersionId": version_id} if version_id and version_id.lower() != "null" else {}
+            extra_args = (
+                {"VersionId": version_id} if version_id and version_id.lower() != "null" else {}
+            )
             s3.download_file(Bucket=bucket, Key=key, Filename=str(local_tar), ExtraArgs=extra_args)
         except Exception as e:
             print(f"  ❌ Error al descargar la versión {version}: {e}")
@@ -70,9 +77,15 @@ def verify_and_generate_evidence():
         evidence_md += f"- **VersionId:** `{version_id}`\n"
         evidence_md += f"- **SHA-256 Esperado (Registry):** `{expected_sha}`\n"
         evidence_md += f"- **SHA-256 Calculado (Local):** `{local_sha}`\n"
-        evidence_md += f"- **Resultado de Integridad:** {'COINCIDE' if match else '❌ NO COINCIDE'}\n\n"
+        evidence_md += (
+            f"- **Resultado de Integridad:** {'COINCIDE' if match else '❌ NO COINCIDE'}\n\n"
+        )
         evidence_md += "### Prueba de Inferencia (Clean Reload)\n"
-        evidence_md += "> **Instrucción para Emilio:** El paquete se descomprimió correctamente. Carga el `architecture.json` y los pesos, ejecuta la inferencia sobre las 3 imágenes de prueba y documenta aquí la comparación contra `predictions.csv`.\n\n"
+        evidence_md += (
+            "> **Instrucción para Emilio:** El paquete se descomprimió correctamente. "
+            "Carga el `architecture.json` y los pesos, ejecuta la inferencia sobre las 3 imágenes "
+            "de prueba y documenta aquí la comparación contra `predictions.csv`.\n\n"
+        )
 
         local_tar.unlink()
 
@@ -80,6 +93,7 @@ def verify_and_generate_evidence():
         f.write(evidence_md)
 
     print(f"\nEvidencia base generada en: {evidence_path}")
+
 
 if __name__ == "__main__":
     verify_and_generate_evidence()

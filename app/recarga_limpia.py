@@ -117,14 +117,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--expected-sha256", required=True)
     p.add_argument("--config-json", type=Path, required=True)
     p.add_argument("--split", choices=("val", "test"), required=True)
-    p.add_argument("--manifest-csv", type=Path, default=Path("../data/derived/manifests/v0.1.1/manifest.csv"))
+    p.add_argument(
+        "--manifest-csv", type=Path, default=Path("../data/derived/manifests/v0.1.1/manifest.csv")
+    )
     p.add_argument("--crops", type=Path, default=Path("../data/derived/crops"))
     p.add_argument("--reference-csv", type=Path, required=True)
     p.add_argument("--selection", type=Path)
     p.add_argument("--n", type=int, default=3)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--write-reference", action="store_true",
-                   help="genera --reference-csv desde este checkpoint y termina")
+    p.add_argument(
+        "--write-reference",
+        action="store_true",
+        help="genera --reference-csv desde este checkpoint y termina",
+    )
     args = p.parse_args(argv)
 
     print(f"\n### Recarga limpia - versión {args.version}\n")
@@ -160,7 +165,10 @@ def main(argv: list[str] | None = None) -> int:
         delta = max(abs(probs[0] - row["prob_cat"]), abs(probs[1] - row["prob_dog"]))
         match = cls == row["predicted_class"] and delta <= PROB_TOLERANCE
         all_ok &= match
-        print(f"| `{cid}` | {row['predicted_class']} | {cls} | {delta:.2e} | {'✅' if match else '❌'} |")
+        print(
+            f"| `{cid}` | {row['predicted_class']} | {cls} | {delta:.2e} | "
+            f"{'✅' if match else '❌'} |"
+        )
     print(f"\nResultado: {'COINCIDE' if all_ok else 'NO COINCIDE'}")
     return 0 if all_ok else 1
 

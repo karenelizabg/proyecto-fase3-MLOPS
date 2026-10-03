@@ -8,14 +8,19 @@ No usa la librería de MLflow ni mlflow.db. Para revisar qué trae un run:
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DUMP = ROOT / "mlflow-store" / "mlflow.sql"
-ARTIFACTS_ROOT = ROOT / "mlflow-store" / "artifacts"
+
+
+def snapshot_dir() -> Path:
+    """Carpeta del snapshot de MLflow: MLFLOW_SNAPSHOT o, por defecto, mlflow-store/."""
+    return Path(os.environ.get("MLFLOW_SNAPSHOT") or ROOT / "mlflow-store")
+
 
 # Orden de columnas de MLflow cuando el INSERT no las nombra.
 SCHEMAS = {
@@ -85,10 +90,10 @@ def _rows(dump: Path):
         if match:
             table = match.group(1).lower()
             if match.group(2):
-                columns = [c.strip(" `\"") for c in match.group(2).split(",")]
+                columns = [c.strip(' `"') for c in match.group(2).split(",")]
             else:
                 columns = SCHEMAS.get(table)
-            rest = line[match.end():]
+            rest = line[match.end() :]
         elif table and line.lstrip().startswith(("(", "VALUES", "values")):
             rest = line
         else:
@@ -98,11 +103,12 @@ def _rows(dump: Path):
             continue
         for values in _tuples(rest):
             if len(values) == len(columns):
-                yield table, dict(zip(columns, values))
+                yield table, dict(zip(columns, values, strict=True))
 
 
-def load_run(run_id: str, dump: Path = DEFAULT_DUMP) -> dict:
+def load_run(run_id: str, dump: Path | None = None) -> dict:
     """Devuelve params, tags y métricas (último valor) de un run."""
+    dump = dump or snapshot_dir() / "mlflow.sql"
     if not dump.exists():
         sys.exit(f"No existe el respaldo de MLflow: {dump} (falta dvc pull?)")
     params: dict = {}
@@ -119,7 +125,9 @@ def load_run(run_id: str, dump: Path = DEFAULT_DUMP) -> dict:
         elif table == "latest_metrics":
             latest[row["key"]] = row["value"]
         elif table == "metrics":
-            history[row["key"]].append((row.get("step") or 0, row.get("timestamp") or 0, row["value"]))
+            history[row["key"]].append(
+                (row.get("step") or 0, row.get("timestamp") or 0, row["value"])
+            )
     metrics = {key: max(values)[2] for key, values in history.items()}
     metrics.update(latest)
     if not params or not tags:
@@ -129,15 +137,18 @@ def load_run(run_id: str, dump: Path = DEFAULT_DUMP) -> dict:
 
 def artifacts_dir(run_id: str) -> Path:
     """Carpeta de artefactos del run dentro del snapshot de DVC."""
-    found = [p for p in ARTIFACTS_ROOT.glob(f"*/{run_id}/artifacts") if p.is_dir()]
+    root = snapshot_dir() / "artifacts"
+    found = [p for p in root.glob(f"*/{run_id}/artifacts") if p.is_dir()]
     if len(found) != 1:
-        sys.exit(f"Se esperaba 1 carpeta de artefactos para {run_id} en {ARTIFACTS_ROOT}; hay {len(found)}.")
+        sys.exit(f"Se esperaba 1 carpeta de artefactos para {run_id} en {root}; hay {len(found)}.")
     return found[0]
 
 
 def typed_params(params: dict) -> dict:
     """MLflow guarda los params como texto: '32' -> 32, '0.0' -> 0.0, 'adam' -> 'adam'."""
-    return {key: _scalar(value) if isinstance(value, str) else value for key, value in params.items()}
+    return {
+        key: _scalar(value) if isinstance(value, str) else value for key, value in params.items()
+    }
 
 
 if __name__ == "__main__":

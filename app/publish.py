@@ -50,7 +50,7 @@ def write_json(path: Path, data) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
-def stage_files(run: dict, version: str, staging: Path) -> list[tuple[Path, str]]:
+def stage_files(run: dict, version: str, staging: Path, card: Path) -> list[tuple[Path, str]]:
     """Reúne (archivo, nombre dentro del paquete). Falla si falta algo."""
     run_id, tags = run["run_id"], run["tags"]
     files: list[tuple[Path, str]] = []
@@ -61,9 +61,12 @@ def stage_files(run: dict, version: str, staging: Path) -> list[tuple[Path, str]
         sys.exit(f"Falta {best}")
     if sha256(best) != tags.get("checkpoint_sha256"):
         sys.exit("El SHA-256 de best.pt no coincide con el tag checkpoint_sha256 del run.")
-    files += [(f, "artifacts/" + f.relative_to(art).as_posix()) for f in sorted(art.rglob("*")) if f.is_file()]
+    files += [
+        (f, "artifacts/" + f.relative_to(art).as_posix())
+        for f in sorted(art.rglob("*"))
+        if f.is_file()
+    ]
 
-    card = ROOT / "build" / f"model_card_{version}.md"
     if not card.exists():
         sys.exit(f"Falta {card}: genera la tarjeta con card.py primero.")
     if run_id not in card.read_text(encoding="utf-8"):
@@ -106,7 +109,10 @@ def stage_files(run: dict, version: str, staging: Path) -> list[tuple[Path, str]
             "transforms": [repr(t) for t in pipeline.transforms],
         },
     )
-    files += [(staging / n, n) for n in ("config.json", "architecture.json", "class_map.json", "preprocess.json")]
+    files += [
+        (staging / n, n)
+        for n in ("config.json", "architecture.json", "class_map.json", "preprocess.json")
+    ]
 
     for name in ("pyproject.toml", "uv.lock"):
         dep = ROOT / "app" / name
@@ -131,13 +137,13 @@ def stage_files(run: dict, version: str, staging: Path) -> list[tuple[Path, str]
     return files
 
 
-def build_package(run: dict, version: str) -> Path:
-    staging = ROOT / "build" / f"package_v{version}"
+def build_package(run: dict, version: str, card_path: Path, workdir: Path) -> Path:
+    staging = workdir / "build" / f"package_v{version}"
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
-    files = stage_files(run, version, staging)
+    files = stage_files(run, version, staging, card_path)
 
-    dist = ROOT / "dist"
+    dist = workdir / "dist"
     dist.mkdir(exist_ok=True)
     tar_path = dist / f"model_release_v{version}.tar.gz"
     with tarfile.open(tar_path, "w:gz") as tar:
@@ -163,58 +169,52 @@ def s3_exists(s3, bucket: str, key: str) -> bool:
         raise
 
 
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("--run-id", required=True)
-    p.add_argument("--version", required=True)
-    p.add_argument("--bucket")
-    p.add_argument("--profile", default="mlops-p3")
-    p.add_argument("--dry-run", action="store_true", help="arma y revisa el paquete sin subirlo")
-    args = p.parse_args(argv)
-    if not args.dry_run and not args.bucket:
-        p.error("--bucket es obligatorio salvo con --dry-run")
+def publish(
+    run_id: str,
+    version: str,
+    s3,
+    bucket: str,
+    registry_path: Path,
+    card_path: Path,
+    workdir: Path,
+) -> int:
+    """Arma el paquete, lo sube con el cliente `s3` dado y lo registra. Nunca sobrescribe."""
+    from botocore.exceptions import ClientError
 
-    run = load_run(args.run_id)
-    key = f"models/releases/v{args.version}/model_release_v{args.version}.tar.gz"
+    run = load_run(run_id)
+    key = f"models/releases/v{version}/model_release_v{version}.tar.gz"
 
-    s3 = None
-    if not args.dry_run:
-        import boto3
-        from botocore.exceptions import ClientError
-
-        s3 = boto3.Session(profile_name=args.profile).client("s3")
-        if s3_exists(s3, args.bucket, key):
-            print(f"ERROR: la versión {args.version} ya existe en s3://{args.bucket}/{key}. No se sobrescribe.")
+    if s3_exists(s3, bucket, key):
+        print(f"ERROR: la versión {version} ya existe en s3://{bucket}/{key}. No se sobrescribe.")
+        return 1
+    try:
+        status = s3.get_bucket_versioning(Bucket=bucket).get("Status")
+        if status != "Enabled":
+            print(f"ERROR: el bucket no tiene versionado activo (Status={status}).")
             return 1
-        try:
-            status = s3.get_bucket_versioning(Bucket=args.bucket).get("Status")
-            if status != "Enabled":
-                print(f"ERROR: el bucket no tiene versionado activo (Status={status}).")
-                return 1
-        except ClientError as e:
-            print(f"Aviso: no se pudo consultar el versionado del bucket ({e}).")
+    except ClientError as e:
+        print(f"Aviso: no se pudo consultar el versionado del bucket ({e}).")
 
-    tar_path = build_package(run, args.version)
+    tar_path = build_package(run, version, card_path, workdir)
     package_sha = sha256(tar_path)
     print(f"SHA-256 del paquete: {package_sha}")
-    if args.dry_run:
-        return 0
 
-    print(f"Subiendo a s3://{args.bucket}/{key} ...")
-    s3.upload_file(str(tar_path), args.bucket, key)
-    version_id = s3.head_object(Bucket=args.bucket, Key=key).get("VersionId")
+    print(f"Subiendo a s3://{bucket}/{key} ...")
+    s3.upload_file(str(tar_path), bucket, key)
+    version_id = s3.head_object(Bucket=bucket, Key=key).get("VersionId")
     if not version_id or version_id == "null":
         print("ERROR: S3 no devolvió VersionId; no se registra la versión.")
         return 1
 
-    registry_path = ROOT / "models" / "registry.json"
-    registry_path.parent.mkdir(exist_ok=True)
-    registry = json.loads(registry_path.read_text(encoding="utf-8")) if registry_path.exists() else {}
-    registry[args.version] = {
-        "s3_path": f"s3://{args.bucket}/{key}",
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    registry = (
+        json.loads(registry_path.read_text(encoding="utf-8")) if registry_path.exists() else {}
+    )
+    registry[version] = {
+        "s3_path": f"s3://{bucket}/{key}",
         "sha256": package_sha,
         "VersionId": version_id,
-        "run_id": args.run_id,
+        "run_id": run_id,
         "checkpoint_sha256": run["tags"]["checkpoint_sha256"],
         "data_release": run["tags"].get("release"),
         "published_at": datetime.now(timezone.utc).isoformat(),
@@ -222,6 +222,43 @@ def main(argv: list[str] | None = None) -> int:
     registry_path.write_text(json.dumps(registry, indent=4), encoding="utf-8")
     print(f"Publicado. VersionId {version_id}. registry.json actualizado.")
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--version", required=True)
+    p.add_argument("--bucket")
+    p.add_argument("--profile", default="mlops-p3")
+    p.add_argument(
+        "--endpoint-url", help="S3 compatible (p. ej. MinIO); sin perfil, credenciales por env"
+    )
+    p.add_argument("--registry", type=Path, default=ROOT / "models" / "registry.json")
+    p.add_argument("--card", type=Path, help="por defecto build/model_card_<versión>.md")
+    p.add_argument("--dry-run", action="store_true", help="arma y revisa el paquete sin subirlo")
+    args = p.parse_args(argv)
+    if not args.dry_run and not args.bucket:
+        p.error("--bucket es obligatorio salvo con --dry-run")
+    card_path = args.card or ROOT / "build" / f"model_card_{args.version}.md"
+
+    if args.dry_run:
+        tar_path = build_package(load_run(args.run_id), args.version, card_path, ROOT)
+        print(f"SHA-256 del paquete: {sha256(tar_path)}")
+        return 0
+
+    import boto3
+    from botocore.config import Config
+
+    if args.endpoint_url:
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=args.endpoint_url,
+            region_name="us-east-1",
+            config=Config(s3={"addressing_style": "path"}),
+        )
+    else:
+        s3 = boto3.Session(profile_name=args.profile).client("s3")
+    return publish(args.run_id, args.version, s3, args.bucket, args.registry, card_path, ROOT)
 
 
 if __name__ == "__main__":
