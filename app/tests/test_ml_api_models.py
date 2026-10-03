@@ -17,6 +17,8 @@ import pytest
 from botocore.exceptions import ClientError
 from starlette.testclient import TestClient
 
+from ml_api import inference
+from ml_api.contracts import PredictionResponse
 from ml_api.server import create_app
 from storage.model_store import head_object, presigned_get_url, read_package_info
 from tests._mcp_fixtures import mcp_settings
@@ -210,6 +212,30 @@ def test_model_detail_is_404_for_an_unknown_version(monkeypatch, tmp_path):
     assert client.get("/models/9.9.9").status_code == 404
 
 
+def test_model_detail_for_the_smoke_version_keeps_dataset_and_model_apart(monkeypatch, tmp_path):
+    # Checklist del ticket: por cada versión (0.1.0 y 1.0.0) la tarjeta, run,
+    # release de datos, manifiesto, bucket/key, VersionId y SHA-256. La versión
+    # del DATASET (data_release = v0.1.1) no es la del modelo (0.1.0).
+    write_registry(tmp_path / "models", a_registry())
+    write_selection(tmp_path / "reports")
+    client = client_for(monkeypatch, tmp_path)
+
+    body = client.get("/models/0.1.0").json()
+
+    assert body["version"] == "0.1.0"
+    assert body["dataset_version"] == "v0.1.1"
+    assert body["run_id"] == "b828e032156e423097e90d797b643faa"
+    assert body["selected"] is False
+    assert body["registered_version_id"] == "v-old"
+    assert body["checkpoint_sha256"] == "b" * 64
+    assert body["s3_bucket"] == "mlops-p3-models-222629887955"
+    assert body["s3_key"] == "models/releases/v0.1.0/model_release_v0.1.0.tar.gz"
+    assert body["card"] == PACKAGE_INFO["card"]
+    assert body["manifest_id"] == PACKAGE_INFO["manifest_id"]
+    assert body["download_url"] is not None
+    assert body["s3_status"]["exists"] is True
+
+
 def test_setting_active_version_persists_and_rejects_a_missing_object(monkeypatch, tmp_path):
     write_registry(tmp_path / "models", a_registry())
     client = client_for(monkeypatch, tmp_path, existing={"1.0.0"})
@@ -234,6 +260,84 @@ def test_setting_active_version_rejects_an_unknown_version_and_bad_body(monkeypa
 
     assert client.post("/models/active", json={"version": "9.9.9"}).status_code == 404
     assert client.post("/models/active", json={}).status_code == 400
+
+
+def a_jpeg() -> bytes:
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), color=(10, 20, 30)).save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
+def test_changing_the_active_version_changes_what_predict_loads(monkeypatch, tmp_path):
+    """ "Hecho cuando" del ticket: cambiar la versión activa (P3-15) cambia el
+    `model_version` y el `checkpoint_sha256` que devuelve `/predict` (P3-16),
+    en el mismo app/settings -- no solo el texto en pantalla.
+    """
+    write_registry(tmp_path / "models", a_registry())
+    write_selection(tmp_path / "reports")
+    settings = mcp_settings(
+        monkeypatch,
+        tmp_path / "dataset",
+        tmp_path / "reports",
+        tmp_path / "derived",
+        tmp_path / "models",
+    )
+
+    def load_model():
+        # Mismo contrato que `inference.load_active_model`, pero sin bajar de S3:
+        # resuelve la versión desde el `active_version.json` que escribe
+        # `POST /models/active`, usando la función real de selección de P3-16.
+        registry = json.loads((tmp_path / "models" / "registry.json").read_text(encoding="utf-8"))
+        version = inference._active_version(registry, tmp_path / "models")
+        return inference.ModelBundle(
+            model=None,  # `predict_image` va monkeypatcheado: no se usa el modelo.
+            image_size=8,
+            version=version,
+            checkpoint_sha256=registry[version]["checkpoint_sha256"],
+        )
+
+    monkeypatch.setattr(
+        inference,
+        "predict_image",
+        lambda bundle, image: PredictionResponse(
+            predicted_label="cat",
+            probabilities={"cat": 1.0, "dog": 0.0},
+            model_version=bundle.version,
+            checkpoint_sha256=bundle.checkpoint_sha256,
+        ),
+    )
+
+    client = TestClient(
+        create_app(
+            settings,
+            load_model=load_model,
+            fetch_crop=lambda image_id, annotation_id: None,
+            model_status_of=lambda entry: {
+                "version_id": "x",
+                "size_bytes": 1,
+                "last_modified": LAST_MODIFIED,
+            },
+            model_download_url_of=lambda entry: "https://signed.example/package",
+            model_package_info_of=lambda entry: PACKAGE_INFO,
+        )
+    )
+
+    assert client.post("/models/active", json={"version": "0.1.0"}).status_code == 200
+    first = client.post("/predict", files={"image": ("cat.jpg", a_jpeg(), "image/jpeg")}).json()
+
+    assert client.post("/models/active", json={"version": "1.0.0"}).status_code == 200
+    second = client.post("/predict", files={"image": ("cat.jpg", a_jpeg(), "image/jpeg")}).json()
+
+    assert first["model_version"] == "0.1.0"
+    assert first["checkpoint_sha256"] == "b" * 64
+    assert second["model_version"] == "1.0.0"
+    assert second["checkpoint_sha256"] == (
+        "f759cde23fc314b63c4a4e3c20127ef1eb84121e579b04e7c97911ada20ab7d9"
+    )
+    assert first["model_version"] != second["model_version"]
+    assert first["checkpoint_sha256"] != second["checkpoint_sha256"]
 
 
 # --- storage/model_store (P3-15) --------------------------------------------

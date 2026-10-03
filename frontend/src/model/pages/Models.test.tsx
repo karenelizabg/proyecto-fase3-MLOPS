@@ -149,4 +149,32 @@ describe("ModelsPage (P3-15)", () => {
       )
     );
   });
+
+  it("al marcar una versión activa refleja el cambio en la página", async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/models/active")) {
+        expect(init?.method).toBe("POST");
+        return Promise.resolve(jsonResponse(detail({ active: true })));
+      }
+      if (url.endsWith("/models/1.0.0")) {
+        return Promise.resolve(jsonResponse(detail()));
+      }
+      return Promise.resolve(
+        jsonResponse({
+          status: "ready",
+          active_version: null,
+          versions: [summary({ version: "1.0.0", dataset_version: "v0.1.1", selected: true })],
+        })
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ModelsPage />);
+
+    fireEvent.click(await screen.findByText("1.0.0"));
+    fireEvent.click(await screen.findByRole("button", { name: "Marcar como activa" }));
+
+    expect(await screen.findByRole("button", { name: "Ya es la activa" })).toBeInTheDocument();
+  });
 });
