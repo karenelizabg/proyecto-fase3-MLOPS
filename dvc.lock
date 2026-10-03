@@ -95,8 +95,8 @@ stages:
       size: 2208
     - path: storage/settings.py
       hash: md5
-      md5: a09f977bccf3baabd36485881c02ee47
-      size: 5141
+      md5: 379850bf9312494ed3a5b72e54e8099a
+      size: 5402
     - path: uv.lock
       hash: md5
       md5: 2a6846583267308530823e8e7fa3b529
@@ -183,8 +183,8 @@ stages:
       size: 12497
     - path: storage/settings.py
       hash: md5
-      md5: a09f977bccf3baabd36485881c02ee47
-      size: 5141
+      md5: 379850bf9312494ed3a5b72e54e8099a
+      size: 5402
     params:
       splits/splits.yaml:
         seed: 42
@@ -255,8 +255,8 @@ stages:
       nfiles: 5
     - path: storage/settings.py
       hash: md5
-      md5: a09f977bccf3baabd36485881c02ee47
-      size: 5141
+      md5: 379850bf9312494ed3a5b72e54e8099a
+      size: 5402
     outs:
     - path: ../reports/splits.json
       hash: md5
