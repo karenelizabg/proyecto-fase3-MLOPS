@@ -12,6 +12,7 @@ es pura y las pruebas no tocan la red (mismo criterio que `create_app` inyectand
 """
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -23,6 +24,8 @@ from ml_api.contracts import (
     ModelS3Status,
     ModelSummary,
 )
+
+logger = logging.getLogger("ml-api.models")
 
 # El estado del registry puede no existir todavía (P3-14 aún no publicó).
 Registry = dict[str, ModelEntry]
@@ -109,6 +112,19 @@ def _status(raw: dict | None) -> ModelS3Status:
     )
 
 
+def _status_for(version: str, entry: ModelEntry, status_of: StatusOf) -> ModelS3Status:
+    """Estado de una versión sin tumbar la lista entera (P3-15).
+
+    Un `head-object` que falla por red/SSO/permisos no es un 500 de `/models`:
+    esa versión queda marcada con `error` y las demás se sirven igual.
+    """
+    try:
+        return _status(status_of(entry))
+    except Exception:
+        logger.exception("no se pudo verificar la versión %s en S3", version)
+        return ModelS3Status(exists=False, error="no se pudo verificar el objeto en S3")
+
+
 def summarize(
     version: str,
     entry: ModelEntry,
@@ -143,7 +159,7 @@ def build_list(
             entry,
             active_version=active_version,
             selected_run_id=selected_run_id,
-            status=_status(status_of(entry)),
+            status=_status_for(version, entry, status_of),
         )
         for version, entry in sorted(registry.items(), key=lambda item: version_key(item[0]))
     ]

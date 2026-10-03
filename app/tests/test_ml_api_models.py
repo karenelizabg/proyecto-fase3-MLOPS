@@ -126,6 +126,7 @@ def test_models_lists_versions_with_live_s3_status_and_dataset_version(monkeypat
         "version_id": "v0.1.0",
         "size_bytes": 1024,
         "last_modified": LAST_MODIFIED.isoformat().replace("+00:00", "Z"),
+        "error": None,
     }
     # `selected` se deriva de reports/selection.json (el registry no lo trae).
     assert first["selected"] is False
@@ -140,6 +141,42 @@ def test_models_marks_a_missing_object_as_not_existing(monkeypatch, tmp_path):
 
     statuses = {entry["version"]: entry["s3_status"]["exists"] for entry in body["versions"]}
     assert statuses == {"0.1.0": False, "1.0.0": True}
+
+
+def test_models_survives_a_head_object_error_on_one_version(monkeypatch, tmp_path):
+    # Un fallo que NO es "no existe" (red, SSO expirado) no debe tumbar la lista:
+    # esa versión queda con `error` y las demás se sirven igual.
+    write_registry(tmp_path / "models", a_registry())
+    settings = mcp_settings(
+        monkeypatch,
+        tmp_path / "dataset",
+        tmp_path / "reports",
+        tmp_path / "derived",
+        tmp_path / "models",
+    )
+
+    def status_of(entry):
+        if entry.s3_path.endswith("v0.1.0/model_release_v0.1.0.tar.gz"):
+            raise RuntimeError("SSO expirado")
+        return {"version_id": "v-final", "size_bytes": 10, "last_modified": LAST_MODIFIED}
+
+    client = TestClient(
+        create_app(
+            settings,
+            model_status_of=status_of,
+            model_download_url_of=lambda entry: None,
+            model_package_info_of=lambda entry: PACKAGE_INFO,
+        )
+    )
+
+    response = client.get("/models")
+
+    assert response.status_code == 200
+    by_version = {entry["version"]: entry["s3_status"] for entry in response.json()["versions"]}
+    assert by_version["0.1.0"]["exists"] is False
+    assert by_version["0.1.0"]["error"] == "no se pudo verificar el objeto en S3"
+    assert by_version["1.0.0"]["exists"] is True
+    assert by_version["1.0.0"]["error"] is None
 
 
 def test_model_detail_derives_bucket_key_card_and_presigned_url(monkeypatch, tmp_path):

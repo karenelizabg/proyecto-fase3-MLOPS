@@ -223,14 +223,11 @@ def create_app(
         return JSONResponse(job.model_dump(mode="json"))
 
     def evaluation(_: Request) -> JSONResponse:
-        reason = lock_reason(
-            selection_path=settings.reports_dir / "selection.json",
-            derived_dir=settings.derived_dir,
-        )
+        reason = lock_reason(selection_path=selection_path, derived_dir=settings.derived_dir)
         if reason:
             return JSONResponse(EvaluationLocked(message=reason).model_dump(mode="json"))
         report = build_evaluation_report(
-            selection_path=settings.reports_dir / "selection.json",
+            selection_path=selection_path,
             evaluation_dir=settings.reports_dir / "evaluation",
         )
         if report is None:
