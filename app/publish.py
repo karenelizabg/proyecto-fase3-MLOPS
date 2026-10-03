@@ -226,7 +226,9 @@ def publish(
         "data_release": run["tags"].get("release"),
         "published_at": datetime.now(timezone.utc).isoformat(),
     }
-    registry_path.write_text(json.dumps(registry, indent=4), encoding="utf-8")
+    registry_path.write_text(  # NOSONAR: ruta validada con safe_path en main()
+        json.dumps(registry, indent=4) + "\n", encoding="utf-8"
+    )
     print(f"Publicado. VersionId {version_id}. registry.json actualizado.")
     return 0
 
@@ -262,7 +264,7 @@ def main(argv: list[str] | None = None) -> int:
         s3 = boto3.client(
             "s3",
             endpoint_url=args.endpoint_url,
-            region_name=os.environ.get("AWS_REGION"),
+            region_name=os.environ.get("AWS_REGION", "us-east-1"),
             config=Config(s3={"addressing_style": "path"}),
         )
     else:

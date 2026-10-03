@@ -1,99 +1,81 @@
+"""Verifica que cada versión de models/registry.json se descarga de S3 por VersionId
+y que su SHA-256 coincide con el registro. Sale con código 1 si algo falla.
+
+    uv run python verify_reload.py [--profile mlops-p3] [--registry ../models/registry.json]
+"""
+
+from __future__ import annotations
+
+import argparse
 import hashlib
 import json
+import sys
 import tarfile
 from pathlib import Path
 
 import boto3
+from mlflow_dump import ROOT
+from safe_path import safe_path
 
 
 def calculate_sha256(filepath: Path) -> str:
-    """Calcula el hash SHA-256 de un archivo."""
-    sha256_hash = hashlib.sha256()
+    digest = hashlib.sha256()
     with open(filepath, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
-    return sha256_hash.hexdigest()
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
-def verify_and_generate_evidence():
-    registry_path = Path("models/registry.json")
-    if not registry_path.exists():
-        print("No se encontró models/registry.json")
-        return
+def split_s3_path(s3_path: str) -> tuple[str, str]:
+    bucket, _, key = s3_path.removeprefix("s3://").partition("/")
+    return bucket, key
 
-    with open(registry_path, "r", encoding="utf-8") as f:
-        registry = json.load(f)
 
-    session = boto3.Session(profile_name="mlops-p3")
-    s3 = session.client("s3")
+def verify_version(s3, version: str, data: dict, dist: Path) -> bool:
+    bucket, key = split_s3_path(data["s3_path"])
+    version_id = data.get("VersionId")
+    local_tar = dist / f"downloaded_v{version}.tar.gz"
+    extra = {"VersionId": version_id} if version_id and version_id.lower() != "null" else {}
+    print(f"Verificando {version} (VersionId {version_id})...")
+    try:
+        s3.download_file(Bucket=bucket, Key=key, Filename=str(local_tar), ExtraArgs=extra)
+    except Exception as e:
+        print(f"  ERROR al descargar {version}: {e}")
+        return False
 
-    docs_dir = Path("docs")
-    docs_dir.mkdir(exist_ok=True)
-    evidence_path = docs_dir / "evidencia-recarga.md"
-
-    evidence_md = "# Evidencia de Recarga Limpia y Verificación\n\n"
-    evidence_md += (
-        "Este documento contiene la validación de los artefactos descargados desde S3, "
-        "garantizando su integridad mediante SHA-256 y VersionId.\n\n"
-    )
-
-    for version, data in registry.items():
-        print(f"Verificando versión {version}...")
-        s3_path = data["s3_path"]
-        expected_sha = data["sha256"]
-        version_id = data.get("VersionId")
-
-        path_parts = s3_path.replace("s3://", "").split("/")
-        bucket = path_parts[0]
-        key = "/".join(path_parts[1:])
-
-        local_tar = Path(f"dist/downloaded_v{version}.tar.gz")
-        local_tar.parent.mkdir(exist_ok=True)
-
-        print(f"  Descargando desde S3 (VersionId: {version_id})...")
-        try:
-            extra_args = (
-                {"VersionId": version_id} if version_id and version_id.lower() != "null" else {}
-            )
-            s3.download_file(Bucket=bucket, Key=key, Filename=str(local_tar), ExtraArgs=extra_args)
-        except Exception as e:
-            print(f"  ❌ Error al descargar la versión {version}: {e}")
-            continue
-
-        local_sha = calculate_sha256(local_tar)
-        match = local_sha == expected_sha
-
-        print(f"  SHA-256 local:  {local_sha}")
-        print(f"  {'HASH COINCIDE' if match else '❌ ERROR DE HASH'}")
-
-        extract_dir = Path(f"eval_v{version}")
+    local_sha = calculate_sha256(local_tar)
+    match = local_sha == data["sha256"]
+    print(f"  SHA-256 esperado:  {data['sha256']}")
+    print(f"  SHA-256 calculado: {local_sha}  {'COINCIDE' if match else 'NO COINCIDE'}")
+    if match:
+        extract_dir = ROOT / f"eval_v{version}"
         extract_dir.mkdir(exist_ok=True)
         with tarfile.open(local_tar, "r:gz") as tar:
-            tar.extractall(path=extract_dir)
-        print(f" Archivos extraídos en: {extract_dir}/")
+            tar.extractall(path=extract_dir, filter="data")
+        print(f"  Extraído en {extract_dir}/")
+    local_tar.unlink()
+    return match
 
-        evidence_md += f"## Versión {version}\n"
-        evidence_md += f"- **Ruta S3:** `{s3_path}`\n"
-        evidence_md += f"- **VersionId:** `{version_id}`\n"
-        evidence_md += f"- **SHA-256 Esperado (Registry):** `{expected_sha}`\n"
-        evidence_md += f"- **SHA-256 Calculado (Local):** `{local_sha}`\n"
-        evidence_md += (
-            f"- **Resultado de Integridad:** {'COINCIDE' if match else '❌ NO COINCIDE'}\n\n"
-        )
-        evidence_md += "### Prueba de Inferencia (Clean Reload)\n"
-        evidence_md += (
-            "> **Instrucción para Emilio:** El paquete se descomprimió correctamente. "
-            "Carga el `architecture.json` y los pesos, ejecuta la inferencia sobre las 3 imágenes "
-            "de prueba y documenta aquí la comparación contra `predictions.csv`.\n\n"
-        )
 
-        local_tar.unlink()
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
+    p.add_argument("--profile", default="mlops-p3")
+    p.add_argument("--registry", type=Path, default=ROOT / "models" / "registry.json")
+    args = p.parse_args(argv)
 
-    with open(evidence_path, "w", encoding="utf-8") as f:
-        f.write(evidence_md)
+    registry_path = safe_path(args.registry)
+    if not registry_path.exists():
+        print(f"No se encontró {registry_path}")
+        return 1
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
 
-    print(f"\nEvidencia base generada en: {evidence_path}")
+    dist = ROOT / "dist"
+    dist.mkdir(exist_ok=True)
+    s3 = boto3.Session(profile_name=args.profile).client("s3")
+    results = [verify_version(s3, v, d, dist) for v, d in registry.items()]
+    print("\nResultado:", "TODO COINCIDE" if all(results) else "HAY FALLOS")
+    return 0 if all(results) else 1
 
 
 if __name__ == "__main__":
-    verify_and_generate_evidence()
+    sys.exit(main())

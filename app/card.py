@@ -322,7 +322,9 @@ def main(argv: list[str] | None = None) -> int:
     reports = safe_path(args.reports_dir)
     output = safe_path(args.output or ROOT / "build" / f"model_card_{version}.md")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(build_card(run_id, version, reports), encoding="utf-8")
+    output.write_text(  # NOSONAR: ruta validada con safe_path
+        build_card(run_id, version, reports), encoding="utf-8"
+    )
     print(f"Tarjeta v{version} escrita en {output}")
     return 0
 
