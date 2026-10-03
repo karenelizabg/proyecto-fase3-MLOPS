@@ -34,6 +34,7 @@ from ml_api import inference as inference_module
 from ml_api.inference import (
     MAX_UPLOAD_SIZE_BYTES,
     ModelBundle,
+    _active_version,
     _decode_image,
     _sniff_image_type,
     load_active_model,
@@ -386,10 +387,24 @@ def test_load_active_model_rejects_a_sha256_mismatch(tmp_path):
     entry["sha256"] = "0" * 64  # no coincide con el paquete real
     (models_dir / "registry.json").write_text(json.dumps({"9.9.9": entry}), encoding="utf-8")
 
+    fake_s3 = _FakeS3(tar_path)
+
     with pytest.raises(RuntimeError, match="SHA-256"):
-        load_active_model(models_dir=models_dir, s3_client=_FakeS3(tar_path))
+        load_active_model(models_dir=models_dir, s3_client=fake_s3)
 
 
 def test_load_active_model_fails_clearly_without_a_registry(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_active_model(models_dir=tmp_path / "no-existe")
+
+
+def test_active_version_follows_the_marker_and_falls_back_to_highest_semver(tmp_path):
+    registry = {"0.1.0": {}, "1.0.0": {}}
+    assert _active_version(registry, tmp_path) == "1.0.0"
+
+    (tmp_path / "active_version.json").write_text('{"active_version": "0.1.0"}', encoding="utf-8")
+    assert _active_version(registry, tmp_path) == "0.1.0"
+
+    (tmp_path / "active_version.json").write_text('{"active_version": "9.9.9"}', encoding="utf-8")
+    with pytest.raises(RuntimeError, match=r"no está en registry\.json"):
+        _active_version(registry, tmp_path)

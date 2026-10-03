@@ -16,18 +16,23 @@
   (P3-14) y `final.py`/`smoke.py` (P3-08/P3-10/P3-13).
 """
 
+import asyncio
 import hashlib
 import io
 import json
+import logging
+import os
+import shutil
 import tarfile
 import tempfile
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 import torch.nn as nn
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 from sqlalchemy import Engine, text
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -41,6 +46,8 @@ from storage.settings import Settings
 from training.config import TrainingConfig
 from training.model import build_model
 from training.preprocess import get_preprocessing_transforms
+
+logger = logging.getLogger("ml-api")
 
 # Mismo límite que `MAX_UPLOAD_SIZE_BYTES` del backend (backend/src/config/env.ts) --
 # el ticket lo deja "por definir, propuesta 5 MB"; ya es el default real del otro lado.
@@ -70,10 +77,19 @@ LoadModel = Callable[[], ModelBundle]
 FetchCrop = Callable[[int, int], Image.Image | None]
 
 
-def _active_version(registry: dict) -> str:
-    """La de semver más alto -- hoy 1.0.0 (candidato seleccionado) sobre 0.1.0
-    (ensayo). `registry.json` no trae un campo "activa" explícito (P3-14,
-    revisado contra el real: ver models/registry.json)."""
+def _active_version(registry: dict, models_dir: Path) -> str:
+    """La de `models/active_version.json` (la marca POST /models/active, P3-15);
+    si no existe, la de semver más alto (hoy 1.0.0 sobre 0.1.0)."""
+    marker = models_dir / "active_version.json"
+    if marker.is_file():
+        try:
+            chosen = json.loads(marker.read_text(encoding="utf-8")).get("active_version")
+        except (json.JSONDecodeError, AttributeError):
+            chosen = None
+        if isinstance(chosen, str) and chosen:
+            if chosen not in registry:
+                raise RuntimeError(f"La versión activa {chosen} no está en registry.json")
+            return chosen
     return max(registry, key=lambda version: tuple(int(part) for part in version.split(".")))
 
 
@@ -87,18 +103,25 @@ def _package_cache_dir(version: str, sha256: str) -> Path:
 
 
 _bundle_cache: dict[str, ModelBundle] = {}
+_load_lock = threading.Lock()
 
 
 def load_active_model(*, models_dir: Path | None = None, s3_client=None) -> ModelBundle:
     models_dir = models_dir or Settings().models_dir
     registry = json.loads((models_dir / "registry.json").read_text(encoding="utf-8"))
-    version = _active_version(registry)
+    version = _active_version(registry, models_dir)
 
     cached = _bundle_cache.get(version)
     if cached is not None:
         return cached
+    with _load_lock:
+        cached = _bundle_cache.get(version)
+        if cached is not None:
+            return cached
+        return _load_bundle(version, registry[version], s3_client)
 
-    entry = registry[version]
+
+def _load_bundle(version: str, entry: dict, s3_client) -> ModelBundle:
     extracted = _package_cache_dir(version, entry["sha256"]) / "extracted"
     if not extracted.is_dir():
         extracted.parent.mkdir(parents=True, exist_ok=True)
@@ -123,10 +146,18 @@ def load_active_model(*, models_dir: Path | None = None, s3_client=None) -> Mode
                 f"registro={entry['sha256']} descargado={actual_sha256}"
             )
 
-        extracted.mkdir(parents=True)
-        with tarfile.open(tar_path) as tar:
-            tar.extractall(extracted, filter="data")
-        tar_path.unlink()
+        # Se extrae aparte y se publica con un rename: un fallo a medias nunca deja
+        # `extracted/` incompleto.
+        staging = Path(tempfile.mkdtemp(dir=extracted.parent, prefix="extracting-"))
+        try:
+            with tarfile.open(tar_path) as tar:
+                tar.extractall(staging, filter="data")
+            os.replace(staging, extracted)
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        finally:
+            tar_path.unlink(missing_ok=True)
 
     config = TrainingConfig.model_validate(
         json.loads((extracted / "config.json").read_text(encoding="utf-8"))
@@ -201,7 +232,7 @@ def _decode_image(data: bytes) -> Image.Image | None:
         probe.verify()
         # `verify()` deja el objeto inutilizable para lo que sigue -- reabrir.
         return Image.open(io.BytesIO(data)).convert("RGB")
-    except (UnidentifiedImageError, OSError, ValueError):
+    except (OSError, ValueError):
         return None
 
 
@@ -260,7 +291,7 @@ async def _resolve_image(form, fetch_crop: FetchCrop) -> Image.Image:
         raise _PredictRequestError("falta el campo 'image' o {'image_id','annotation_id'}")
 
     if has_upload:
-        data = await upload.read()
+        data = await upload.read(MAX_UPLOAD_SIZE_BYTES + 1)
         if len(data) > MAX_UPLOAD_SIZE_BYTES:
             raise _PredictRequestError(
                 f"la imagen supera el máximo de {MAX_UPLOAD_SIZE_BYTES} bytes"
@@ -273,7 +304,7 @@ async def _resolve_image(form, fetch_crop: FetchCrop) -> Image.Image:
         return image
 
     image_id, annotation_id = recrop_ids
-    image = fetch_crop(image_id, annotation_id)
+    image = await asyncio.to_thread(fetch_crop, image_id, annotation_id)
     if image is None:
         raise _PredictRequestError(
             f"no existe la anotación {annotation_id} de la imagen {image_id}", status_code=404
@@ -290,14 +321,17 @@ def predict_route(load_model: LoadModel, fetch_crop: FetchCrop = fetch_crop_from
             return JSONResponse({"error": str(error)}, status_code=error.status_code)
 
         try:
-            bundle = load_model()
-        except Exception as error:
+            bundle = await asyncio.to_thread(load_model)
+        except Exception:
             # Registro ausente, SHA-256 que no coincide, S3/SSO caído -- lo que
-            # sea, es "el modelo no está disponible ahora", no un 400 del
-            # cliente ni un 500 sin explicación.
-            return JSONResponse({"error": str(error)}, status_code=503)
+            # sea, es "el modelo no está disponible ahora". El detalle va al log,
+            # no al cliente.
+            logger.exception("No se pudo cargar el modelo activo")
+            return JSONResponse(
+                {"error": "El modelo no está disponible en este momento"}, status_code=503
+            )
 
-        result = predict_image(bundle, image)
+        result = await asyncio.to_thread(predict_image, bundle, image)
         return JSONResponse(result.model_dump(mode="json"), status_code=200)
 
     return handler
