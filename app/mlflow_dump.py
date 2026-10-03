@@ -44,43 +44,65 @@ def _scalar(token: str):
     return token
 
 
+def _quoted(text: str, i: int) -> tuple[str, int]:
+    """Lee una cadena entre comillas simples; `text[i]` es la comilla de apertura."""
+    n, buf = len(text), []
+    i += 1
+    while i < n:
+        c = text[i]
+        if c == "\\" and i + 1 < n:
+            buf.append(_ESCAPES.get(text[i + 1], text[i + 1]))
+            i += 2
+        elif c == "'" and i + 1 < n and text[i + 1] == "'":
+            buf.append("'")
+            i += 2
+        elif c == "'":
+            return "".join(buf), i + 1
+        else:
+            buf.append(c)
+            i += 1
+    return "".join(buf), i
+
+
+def _bare(text: str, i: int) -> tuple[object, int]:
+    """Lee un valor sin comillas (número, NULL, texto suelto) hasta la coma o el paréntesis."""
+    j = i
+    while j < len(text) and text[j] not in ",)":
+        j += 1
+    return _scalar(text[i:j].strip()), j
+
+
+def _tuple_values(text: str, i: int) -> tuple[list, int]:
+    """Lee los valores de una tupla; `i` va justo después del "(". Devuelve el índice tras ")"."""
+    values = []
+    while i < len(text) and text[i] != ")":
+        if text[i] == "'":
+            value, i = _quoted(text, i)
+            values.append(value)
+        elif text[i] in ", \t\r\n":
+            i += 1
+        else:
+            value, i = _bare(text, i)
+            values.append(value)
+    return values, i + 1
+
+
 def _tuples(text: str):
     """Extrae las tuplas (...) de un fragmento de INSERT, respetando comillas y escapes."""
-    i, n = 0, len(text)
-    while i < n:
+    i = 0
+    while i < len(text):
         if text[i] != "(":
             i += 1
             continue
-        i += 1
-        values = []
-        while i < n and text[i] != ")":
-            c = text[i]
-            if c == "'":
-                buf, i = [], i + 1
-                while i < n:
-                    if text[i] == "\\" and i + 1 < n:
-                        buf.append(_ESCAPES.get(text[i + 1], text[i + 1]))
-                        i += 2
-                    elif text[i] == "'" and i + 1 < n and text[i + 1] == "'":
-                        buf.append("'")
-                        i += 2
-                    elif text[i] == "'":
-                        i += 1
-                        break
-                    else:
-                        buf.append(text[i])
-                        i += 1
-                values.append("".join(buf))
-            elif c in ", \t\r\n":
-                i += 1
-            else:
-                j = i
-                while j < n and text[j] not in ",)":
-                    j += 1
-                values.append(_scalar(text[i:j].strip()))
-                i = j
-        i += 1
+        values, i = _tuple_values(text, i + 1)
         yield values
+
+
+def _columns_for(match: re.Match, table: str) -> list[str] | None:
+    """Columnas del INSERT: las nombradas o, si no hay, el orden de MLflow para la tabla."""
+    if match.group(2):
+        return [c.strip(' `"') for c in match.group(2).split(",")]
+    return SCHEMAS.get(table)
 
 
 def _rows(dump: Path):
@@ -89,10 +111,7 @@ def _rows(dump: Path):
         match = _INSERT.search(line)
         if match:
             table = match.group(1).lower()
-            if match.group(2):
-                columns = [c.strip(' `"') for c in match.group(2).split(",")]
-            else:
-                columns = SCHEMAS.get(table)
+            columns = _columns_for(match, table)
             rest = line[match.end() :]
         elif table and line.lstrip().startswith(("(", "VALUES", "values")):
             rest = line

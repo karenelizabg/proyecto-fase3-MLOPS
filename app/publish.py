@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import sys
 import tarfile
@@ -23,18 +24,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mlflow_dump import ROOT, artifacts_dir, load_run, typed_params
+from safe_path import safe_path, safe_run_id, safe_version
 
 sys.path.insert(0, str(ROOT / "app"))
 
+CONFIG_JSON = "config.json"
+ARCHITECTURE_JSON = "architecture.json"
+CLASS_MAP_JSON = "class_map.json"
+PREPROCESS_JSON = "preprocess.json"
+PACKAGE_JSON = "package.json"
+
 REQUIRED = (
     "artifacts/checkpoint/best.pt",
-    "config.json",
-    "architecture.json",
-    "class_map.json",
-    "preprocess.json",
+    CONFIG_JSON,
+    ARCHITECTURE_JSON,
+    CLASS_MAP_JSON,
+    PREPROCESS_JSON,
     "model_card.md",
     "dependencies/pyproject.toml",
-    "package.json",
+    PACKAGE_JSON,
 )
 
 
@@ -77,12 +85,12 @@ def stage_files(run: dict, version: str, staging: Path, card: Path) -> list[tupl
     for key in ("image_size", "hidden_layers", "dropout"):
         if key not in config:
             sys.exit(f"Falta el param '{key}' en el run.")
-    write_json(staging / "config.json", config)
+    write_json(staging / CONFIG_JSON, config)
 
     from training.model import export_architecture_and_class_map
     from training.preprocess import get_preprocessing_transforms
 
-    arch_path, cmap_path = staging / "architecture.json", staging / "class_map.json"
+    arch_path, cmap_path = staging / ARCHITECTURE_JSON, staging / CLASS_MAP_JSON
     export_architecture_and_class_map(str(arch_path), str(cmap_path))
     class_map = json.loads(cmap_path.read_text())
     if class_map != json.loads(tags["classes"]):
@@ -91,7 +99,7 @@ def stage_files(run: dict, version: str, staging: Path, card: Path) -> list[tupl
     arch.update(
         {
             "builder": "training.model.build_model",
-            "config_file": "config.json",
+            "config_file": CONFIG_JSON,
             "hidden_layers": config["hidden_layers"],
             "dropout": config["dropout"],
             "num_classes": len(class_map),
@@ -101,7 +109,7 @@ def stage_files(run: dict, version: str, staging: Path, card: Path) -> list[tupl
 
     pipeline = get_preprocessing_transforms("test", config["image_size"])
     write_json(
-        staging / "preprocess.json",
+        staging / PREPROCESS_JSON,
         {
             "entry_point": "training.preprocess.get_preprocessing_transforms",
             "split": "test",
@@ -110,8 +118,7 @@ def stage_files(run: dict, version: str, staging: Path, card: Path) -> list[tupl
         },
     )
     files += [
-        (staging / n, n)
-        for n in ("config.json", "architecture.json", "class_map.json", "preprocess.json")
+        (staging / n, n) for n in (CONFIG_JSON, ARCHITECTURE_JSON, CLASS_MAP_JSON, PREPROCESS_JSON)
     ]
 
     for name in ("pyproject.toml", "uv.lock"):
@@ -132,8 +139,8 @@ def stage_files(run: dict, version: str, staging: Path, card: Path) -> list[tupl
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files": {arc: sha256(src) for src, arc in files},
     }
-    write_json(staging / "package.json", package)
-    files.append((staging / "package.json", "package.json"))
+    write_json(staging / PACKAGE_JSON, package)
+    files.append((staging / PACKAGE_JSON, PACKAGE_JSON))
     return files
 
 
@@ -239,10 +246,12 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     if not args.dry_run and not args.bucket:
         p.error("--bucket es obligatorio salvo con --dry-run")
-    card_path = args.card or ROOT / "build" / f"model_card_{args.version}.md"
+    version, run_id = safe_version(args.version), safe_run_id(args.run_id)
+    card_path = safe_path(args.card or ROOT / "build" / f"model_card_{version}.md")
+    registry = safe_path(args.registry)
 
     if args.dry_run:
-        tar_path = build_package(load_run(args.run_id), args.version, card_path, ROOT)
+        tar_path = build_package(load_run(run_id), version, card_path, ROOT)
         print(f"SHA-256 del paquete: {sha256(tar_path)}")
         return 0
 
@@ -253,12 +262,12 @@ def main(argv: list[str] | None = None) -> int:
         s3 = boto3.client(
             "s3",
             endpoint_url=args.endpoint_url,
-            region_name="us-east-1",
+            region_name=os.environ.get("AWS_REGION"),
             config=Config(s3={"addressing_style": "path"}),
         )
     else:
         s3 = boto3.Session(profile_name=args.profile).client("s3")
-    return publish(args.run_id, args.version, s3, args.bucket, args.registry, card_path, ROOT)
+    return publish(run_id, version, s3, args.bucket, registry, card_path, ROOT)
 
 
 if __name__ == "__main__":

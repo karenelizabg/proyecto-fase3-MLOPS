@@ -282,8 +282,10 @@ def test_package_fails_when_best_checkpoint_is_missing(world, tmp_path):
     art = world.snapshot / "artifacts" / "1" / SELECTED_RUN / "artifacts"
     (art / "checkpoint" / "best.pt").unlink()
 
+    run = publish.load_run(SELECTED_RUN)
+
     with pytest.raises(SystemExit, match=r"best\.pt"):
-        publish.build_package(publish.load_run(SELECTED_RUN), "1.0.0", card, tmp_path / "work")
+        publish.build_package(run, "1.0.0", card, tmp_path / "work")
 
 
 # --- MinIO -----------------------------------------------------------------------------

@@ -14,7 +14,7 @@ Sale con código 1 si algo no coincide: no hay resultado "simulado".
 Uso (desde `app/`, con el venv del proyecto):
 
     python recarga_limpia.py --version 1.0.0 \
-        --checkpoint /tmp/v1.0.0/best.pt \
+        --checkpoint ../eval_v1.0.0/artifacts/checkpoint/best.pt \
         --expected-sha256 <sha del registry.json> \
         --config-json config_r02.json \
         --reference-csv ../reports/evaluation/predictions.csv \
@@ -36,6 +36,7 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+from safe_path import safe_path
 
 from training.config import TrainingConfig
 from training.data import create_dataloader
@@ -131,26 +132,30 @@ def main(argv: list[str] | None = None) -> int:
         help="genera --reference-csv desde este checkpoint y termina",
     )
     args = p.parse_args(argv)
+    checkpoint, config_json = safe_path(args.checkpoint), safe_path(args.config_json)
+    manifest_csv, crops = safe_path(args.manifest_csv), safe_path(args.crops)
+    reference_csv = safe_path(args.reference_csv)
+    selection = safe_path(args.selection) if args.selection else None
 
     print(f"\n### Recarga limpia - versión {args.version}\n")
-    actual = sha256_of(args.checkpoint)
+    actual = sha256_of(checkpoint)
     ok_sha = actual == args.expected_sha256
     print(f"- SHA-256 esperado:  `{args.expected_sha256}`")
     print(f"- SHA-256 calculado: `{actual}` {'✅' if ok_sha else '❌'}")
     if not ok_sha:
         return 1
-    guard_split(args.split, actual, args.selection)
+    guard_split(args.split, actual, selection)
 
-    config = TrainingConfig.model_validate(json.loads(args.config_json.read_text()))
-    model = load_model(args.checkpoint, config)
-    predictions = predict_split(model, config, args.manifest_csv, args.crops, args.split)
+    config = TrainingConfig.model_validate(json.loads(config_json.read_text()))
+    model = load_model(checkpoint, config)
+    predictions = predict_split(model, config, manifest_csv, crops, args.split)
 
     if args.write_reference:
-        write_reference(predictions, args.manifest_csv, args.split, args.reference_csv)
-        print(f"\nReferencia escrita: `{args.reference_csv}` ({len(predictions)} recortes).")
+        write_reference(predictions, manifest_csv, args.split, reference_csv)
+        print(f"\nReferencia escrita: `{reference_csv}` ({len(predictions)} recortes).")
         return 0
 
-    reference = pd.read_csv(args.reference_csv, dtype={"crop_id": str})
+    reference = pd.read_csv(reference_csv, dtype={"crop_id": str})
     sample = reference.sample(args.n, random_state=args.seed)
     print("\n| Recorte | Clase referencia | Clase recarga | máx \\|Δ prob\\| | ¿Coincide? |")
     print("|---|---|---|---|---|")
