@@ -231,10 +231,10 @@ services:
       - ~/.aws:/home/appuser/.aws:ro
     restart: on-failure:5
 
-  # P3-03: /health, /training/jobs (P3-09), /evaluation y /crops (P3-15) son
-  # reales; Experiments (P3-12) lee MLflow; Models (P3-15) lee el
-  # registry.json de P3-14 y responde "pending" hasta que exista. Sin publicar
-  # puerto: solo nginx (servicio `frontend`) lo alcanza, en /ml-api/.
+  # P3-03: /health, /training/jobs (P3-09), /evaluation y /crops (P3-15) y
+  # /models (P3-15, sobre el catálogo de P3-14) son reales; Experiments (P3-12)
+  # lee MLflow. Sin publicar puerto: solo nginx (servicio `frontend`) lo
+  # alcanza, en /ml-api/.
   ml-api:
     build:
       context: ./app
@@ -249,15 +249,20 @@ services:
       <<: *pipeline-env
       MLFLOW_TRACKING_URI: http://mlflow:5000
       ML_API_HOST: 0.0.0.0
+      # P3-15: catálogo y versión activa de Models.
+      MODELS_DIR: /app/models
+      # El bucket de modelos vive en AWS S3 (docs/decisiones-proyecto3.md,
+      # sección 9); se usa el mismo perfil SSO que trainer-worker.
+      AWS_PROFILE: ${AWS_PROFILE:-mlops-p3}
     volumes:
       # P3-09: `derived` solo lectura -- ml-api valida (manifest.csv), nunca
       # escribe el dataset derivado.
       - ./data/derived:/app/data/derived:ro
-      # P3-15: `reports` en lectura/escritura -- además de leer `releases`,
-      # `selection.json` y `evaluation/`, Models escribe su propio estado
-      # (`reports/models/active_version.json`) al elegir la versión activa. No
-      # toca ningún reporte del pipeline.
-      - ./reports:/app/reports
+      - ./reports:/app/reports:ro
+      # P3-15: catálogo de P3-14 (lectura) + `active_version.json` (escritura).
+      - ./models:/app/models
+      # Solo lectura: el perfil SSO para el head-object y la URL prefirmada.
+      - ~/.aws:/home/appuser/.aws:ro
     restart: on-failure:5
 
 volumes:

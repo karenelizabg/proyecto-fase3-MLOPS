@@ -26,13 +26,13 @@ function summary(overrides: Record<string, unknown> = {}) {
   return {
     version: "0.1.0",
     dataset_version: "v0.1.0",
-    run_id: "smoke-run-1234",
-    release: "v0.1.0",
-    manifest_id: "v0.1.0-aaaa",
-    published_at: "2026-09-29T10:00:00Z",
+    run_id: "b828e032156e423097e90d797b643faa",
+    published_at: "2026-10-03T01:26:45Z",
+    package_sha256: "a".repeat(64),
+    registered_version_id: "v-old",
     selected: false,
     active: false,
-    s3_status: { exists: true, version_id: "v-1", size_bytes: 1024, last_modified: null },
+    s3_status: { exists: true, version_id: "v-old", size_bytes: 1024, last_modified: null },
     ...overrides,
   };
 }
@@ -40,23 +40,21 @@ function summary(overrides: Record<string, unknown> = {}) {
 function detail(overrides: Record<string, unknown> = {}) {
   return {
     status: "ready",
-    model_name: "clasificador-perro-gato",
     version: "1.0.0",
     dataset_version: "v0.1.1",
     run_id: "7e7b4a4b35464cfebb6b41714a3ad931",
-    release: "v0.1.1",
-    manifest_id: "v0.1.1-53fc84fdaa07",
-    manifest_sha256: "d".repeat(64),
+    published_at: "2026-10-03T01:27:42Z",
+    package_sha256: "c".repeat(64),
+    registered_version_id: "v-final",
     checkpoint_sha256: "e".repeat(64),
-    package_sha256: "f".repeat(64),
-    s3_bucket: "mlops-p3-models",
-    s3_key: "models/clasificador-perro-gato/1.0.0/",
-    s3_version_id: "v-final",
-    published_at: "2026-09-30T18:00:00Z",
+    run_kind: "campaign",
+    manifest_id: "v0.1.1-53fc84fdaa07",
     selected: true,
     active: false,
+    s3_bucket: "mlops-p3-models-222629887955",
+    s3_key: "models/releases/v1.0.0/model_release_v1.0.0.tar.gz",
     card: "Modelo final, candidato r02.",
-    download_url: "https://signed.example/models/clasificador-perro-gato/1.0.0/",
+    download_url: "https://signed.example/models/releases/v1.0.0/model_release_v1.0.0.tar.gz",
     s3_status: { exists: true, version_id: "v-final", size_bytes: 2048, last_modified: null },
     ...overrides,
   };
@@ -83,14 +81,12 @@ describe("ModelsPage (P3-15)", () => {
       vi.fn().mockResolvedValue(
         jsonResponse({
           status: "ready",
-          model_name: "clasificador-perro-gato",
           active_version: "1.0.0",
           versions: [
             summary(),
             summary({
               version: "1.0.0",
               dataset_version: "v0.1.1",
-              release: "v0.1.1",
               selected: true,
               active: true,
               s3_status: {
@@ -107,9 +103,9 @@ describe("ModelsPage (P3-15)", () => {
 
     render(<ModelsPage />);
 
-    expect(await screen.findByText(/versión activa: 1.0.0/)).toBeInTheDocument();
-    expect(screen.getByText("dataset v0.1.0 · release v0.1.0")).toBeInTheDocument();
-    expect(screen.getByText("dataset v0.1.1 · release v0.1.1")).toBeInTheDocument();
+    expect(await screen.findByText(/Versión activa para inferencia: 1\.0\.0/)).toBeInTheDocument();
+    expect(screen.getByText("dataset v0.1.0")).toBeInTheDocument();
+    expect(screen.getByText("dataset v0.1.1")).toBeInTheDocument();
     expect(screen.getAllByText("activa").length).toBeGreaterThan(0);
     expect(screen.getByText("candidato")).toBeInTheDocument();
   });
@@ -132,7 +128,6 @@ describe("ModelsPage (P3-15)", () => {
       return Promise.resolve(
         jsonResponse({
           status: "ready",
-          model_name: "clasificador-perro-gato",
           active_version: null,
           versions: [summary({ version: "1.0.0", dataset_version: "v0.1.1", selected: true })],
         })

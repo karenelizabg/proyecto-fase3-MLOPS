@@ -52,12 +52,10 @@ function VersionCard({
         <span className="font-mono text-sm font-semibold text-ink">{model.version}</span>
         {model.active && <Tag tone="active">activa</Tag>}
         {model.selected && <Tag tone="selected">candidato</Tag>}
-        <span className="text-xs text-ink-muted">
-          dataset {model.dataset_version} · release {model.release}
-        </span>
+        <span className="text-xs text-ink-muted">dataset {model.dataset_version}</span>
       </div>
       <p className="text-xs text-ink-muted">
-        run {model.run_id.slice(0, 8)} · {model.manifest_id}
+        run {model.run_id.slice(0, 8)} · paquete {model.package_sha256.slice(0, 12)}…
       </p>
       <p
         className={`text-xs ${model.s3_status.exists ? "text-status-done" : "text-status-pending"}`}
@@ -92,10 +90,12 @@ function DetailPanel({
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
         <dt className="text-ink-muted">run_id</dt>
         <dd className="font-mono text-xs">{detail.run_id}</dd>
-        <dt className="text-ink-muted">release</dt>
-        <dd>{detail.release}</dd>
+        <dt className="text-ink-muted">tipo de corrida</dt>
+        <dd>{detail.run_kind ?? "—"}</dd>
         <dt className="text-ink-muted">manifiesto</dt>
-        <dd className="font-mono text-xs">{detail.manifest_id}</dd>
+        <dd className="font-mono text-xs">{detail.manifest_id ?? "—"}</dd>
+        <dt className="text-ink-muted">VersionId registrado</dt>
+        <dd className="font-mono text-xs">{detail.registered_version_id}</dd>
         <dt className="text-ink-muted">SHA-256 paquete</dt>
         <dd className="break-all font-mono text-xs">{detail.package_sha256}</dd>
         <dt className="text-ink-muted">S3</dt>
@@ -208,7 +208,7 @@ export function ModelsPage() {
           <>
             <div className="flex flex-col gap-2">
               <h2 className="text-sm font-medium text-ink">
-                {list.data.model_name} · versión activa: {list.data.active_version ?? "ninguna"}
+                Versión activa para inferencia: {list.data.active_version ?? "ninguna"}
               </h2>
               {list.data.versions.length === 0 ? (
                 <p className="text-sm text-ink-muted">El registro no tiene versiones.</p>

@@ -1,12 +1,14 @@
 """Lectura y estado de los modelos publicados (P3-15).
 
-El catálogo (`reports/models/registry.json`) lo produce P3-14; aquí solo se lee
-y se le agrega el estado **en vivo** de S3 (`head-object`), la URL prefirmada de
-descarga y la elección de la versión activa para inferencia.
+El catálogo (`models/registry.json`) lo produce P3-14 (`app/publish.py`); aquí
+solo se lee y se le agrega el estado **en vivo** de S3 (`head-object`), la URL
+prefirmada de descarga, la tarjeta (que viaja dentro del paquete) y la elección
+de la versión activa para inferencia.
 
-La dependencia de S3 entra como `status_of`/`download_url_of`, no como una
-llamada directa: así esta capa es pura y las pruebas no tocan una red (mismo
-criterio que `create_app` inyectando `list_jobs`).
+Las dependencias de S3 y del paquete entran como callables (`status_of`,
+`download_url_of`, `package_info_of`), no como llamadas directas: así esta capa
+es pura y las pruebas no tocan la red (mismo criterio que `create_app` inyectando
+`list_jobs`).
 """
 
 import json
@@ -18,29 +20,63 @@ from ml_api.contracts import (
     ModelDetail,
     ModelEntry,
     ModelList,
-    ModelRegistry,
     ModelS3Status,
     ModelSummary,
 )
 
+# El estado del registry puede no existir todavía (P3-14 aún no publicó).
+Registry = dict[str, ModelEntry]
+StatusOf = Callable[[ModelEntry], dict | None]
+DownloadUrlOf = Callable[[ModelEntry], str | None]
+PackageInfoOf = Callable[[ModelEntry], dict | None]
+
 
 class ModelVersionNotFound(LookupError):
-    """La versión no está en `registry.json`."""
+    """La versión no está en `models/registry.json`."""
 
 
 class ModelObjectMissing(RuntimeError):
-    """Se pidió marcar/publicar una versión cuyo objeto no existe en S3."""
+    """Se pidió marcar como activa una versión cuyo objeto no existe en S3."""
 
 
-StatusOf = Callable[[ModelEntry], dict | None]
-DownloadUrlOf = Callable[[ModelEntry], str | None]
+def version_key(version: str) -> tuple[int, ...]:
+    """Ordena 0.10.0 después de 0.9.0 (un sort de strings lo haría al revés)."""
+    parts = []
+    for piece in version.split("."):
+        parts.append(int(piece) if piece.isdigit() else 0)
+    return tuple(parts)
 
 
-def load_registry(path: Path) -> ModelRegistry | None:
+def split_s3_path(s3_path: str) -> tuple[str, str]:
+    """`s3://bucket/key` → `(bucket, key)`."""
+    without_scheme = s3_path.removeprefix("s3://")
+    bucket, _, key = without_scheme.partition("/")
+    return bucket, key
+
+
+def load_registry(path: Path) -> Registry | None:
     """`None` mientras P3-14 no haya publicado el catálogo."""
     if not path.is_file():
         return None
-    return ModelRegistry.model_validate_json(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    # `model_validate_json` (no `model_validate`): el contrato es `strict=True`
+    # y las fechas del registry son strings ISO; en modo JSON sí se convierten.
+    return {
+        version: ModelEntry.model_validate_json(json.dumps(entry))
+        for version, entry in payload.items()
+    }
+
+
+def read_selected_run_id(selection_path: Path) -> str | None:
+    """`run_id` del candidato sellado en P3-11; el registry de P3-14 no lo marca."""
+    if not selection_path.is_file():
+        return None
+    try:
+        payload = json.loads(selection_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    run_id = payload.get("run_id")
+    return run_id if isinstance(run_id, str) and run_id else None
 
 
 def read_active_version(path: Path) -> str | None:
@@ -74,73 +110,89 @@ def _status(raw: dict | None) -> ModelS3Status:
 
 
 def summarize(
-    entry: ModelEntry, *, active_version: str | None, status: ModelS3Status
+    version: str,
+    entry: ModelEntry,
+    *,
+    active_version: str | None,
+    selected_run_id: str | None,
+    status: ModelS3Status,
 ) -> ModelSummary:
     return ModelSummary(
-        version=entry.version,
-        dataset_version=entry.dataset_version,
+        version=version,
+        dataset_version=entry.data_release,
         run_id=entry.run_id,
-        release=entry.release,
-        manifest_id=entry.manifest_id,
         published_at=entry.published_at,
-        selected=entry.selected,
-        active=entry.version == active_version,
+        package_sha256=entry.sha256,
+        registered_version_id=entry.VersionId,
+        selected=selected_run_id is not None and entry.run_id == selected_run_id,
+        active=version == active_version,
         s3_status=status,
     )
 
 
 def build_list(
-    registry: ModelRegistry, *, active_version: str | None, status_of: StatusOf
+    registry: Registry,
+    *,
+    active_version: str | None,
+    selected_run_id: str | None,
+    status_of: StatusOf,
 ) -> ModelList:
     versions = [
-        summarize(entry, active_version=active_version, status=_status(status_of(entry)))
-        for entry in registry.versions
+        summarize(
+            version,
+            entry,
+            active_version=active_version,
+            selected_run_id=selected_run_id,
+            status=_status(status_of(entry)),
+        )
+        for version, entry in sorted(registry.items(), key=lambda item: version_key(item[0]))
     ]
-    return ModelList(
-        model_name=registry.model_name, active_version=active_version, versions=versions
-    )
+    return ModelList(active_version=active_version, versions=versions)
 
 
-def find_entry(registry: ModelRegistry, version: str) -> ModelEntry:
-    for entry in registry.versions:
-        if entry.version == version:
-            return entry
-    raise ModelVersionNotFound(version)
+def find_entry(registry: Registry, version: str) -> ModelEntry:
+    if version not in registry:
+        raise ModelVersionNotFound(version)
+    return registry[version]
 
 
 def build_detail(
-    registry: ModelRegistry,
+    registry: Registry,
     version: str,
     *,
     active_version: str | None,
+    selected_run_id: str | None,
     status_of: StatusOf,
     download_url_of: DownloadUrlOf,
+    package_info_of: PackageInfoOf,
 ) -> ModelDetail:
     entry = find_entry(registry, version)
+    bucket, key = split_s3_path(entry.s3_path)
     raw_status = status_of(entry)
+    # El paquete solo se inspecciona si de verdad existe en S3 (evita descargar
+    # un objeto ausente y da una tarjeta/trazabilidad honestas).
+    package = package_info_of(entry) if raw_status is not None else None
     return ModelDetail(
-        model_name=registry.model_name,
-        version=entry.version,
-        dataset_version=entry.dataset_version,
+        version=version,
+        dataset_version=entry.data_release,
         run_id=entry.run_id,
-        release=entry.release,
-        manifest_id=entry.manifest_id,
-        manifest_sha256=entry.manifest_sha256,
-        checkpoint_sha256=entry.checkpoint_sha256,
-        package_sha256=entry.package_sha256,
-        s3_bucket=entry.s3_bucket,
-        s3_key=entry.s3_key,
-        s3_version_id=entry.s3_version_id,
         published_at=entry.published_at,
-        selected=entry.selected,
-        active=entry.version == active_version,
-        card=entry.card,
+        package_sha256=entry.sha256,
+        registered_version_id=entry.VersionId,
+        checkpoint_sha256=entry.checkpoint_sha256,
+        run_kind=package.get("run_kind") if package else None,
+        manifest_id=package.get("manifest_id") if package else None,
+        selected=selected_run_id is not None and entry.run_id == selected_run_id,
+        active=version == active_version,
+        s3_bucket=bucket,
+        s3_key=key,
+        card=package.get("card") if package else None,
         download_url=download_url_of(entry) if raw_status is not None else None,
         s3_status=_status(raw_status),
     )
 
 
-def activate_version(registry: ModelRegistry, version: str, *, status_of: StatusOf) -> ModelEntry:
+def activate_version(registry: Registry, version: str, *, status_of: StatusOf) -> ModelEntry:
     """Marca `version` como activa **solo si su objeto existe en S3**.
 
     El rechazo explícito de un objeto inexistente es parte del #23: no se puede

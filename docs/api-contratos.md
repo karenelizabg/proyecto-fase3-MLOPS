@@ -33,7 +33,7 @@ expone: es un servicio Python aparte, no una ruta más del backend existente.
 | `/ml-api/experiments` | GET | `PendingEndpoint` | Pendiente — P3-12 |
 | `/ml-api/evaluation` | GET | `EvaluationReport`, `EvaluationLocked` o `PendingEndpoint` | Real (P3-15): candado P3-11; `PendingEndpoint` (P3-13) solo si falta `reports/evaluation` |
 | `/ml-api/crops/{crop_id}` | GET | `image/jpeg` | Real (P3-15): recorte real de `data/derived/crops/images/` |
-| `/ml-api/models` | GET | `ModelList` o `PendingEndpoint` | P3-15: lee `reports/models/registry.json` (P3-14); `PendingEndpoint` mientras no exista |
+| `/ml-api/models` | GET | `ModelList` o `PendingEndpoint` | P3-15: lee `models/registry.json` (P3-14); `PendingEndpoint` mientras no exista |
 | `/ml-api/models/{version}` | GET | `ModelDetail` | Real (P3-15): tarjeta, procedencia y URL prefirmada |
 | `/ml-api/models/active` | POST | `SetActiveVersionRequest` → `ModelDetail` | Real (P3-15): rechaza marcar una versión sin objeto en S3 |
 | `/ml-api/inference` | GET | `PendingEndpoint` | Pendiente — P3-16 |
@@ -183,56 +183,56 @@ da `400`, un archivo ausente `404`.
 
 ## Models (P3-15)
 
-El catálogo lo produce **P3-14** en `reports/models/registry.json`. Este es el
-contrato que P3-15 propone a P3-14 (un campo de más o de menos es un bug, como
-en el resto del repo):
+El catálogo lo produce **P3-14** (`app/publish.py`, #62) en
+`models/registry.json`: un dict `version → entrada`, con los nombres de campo
+tal como los escribe `publish.py` (no se inventan).
 
 ```json
 {
-  "schema_version": "1.0",
-  "model_name": "clasificador-perro-gato",
-  "versions": [
-    {
-      "version": "1.0.0",
-      "dataset_version": "v0.1.1",
-      "run_id": "7e7b4a4b...",
-      "release": "v0.1.1",
-      "manifest_id": "v0.1.1-53fc84fdaa07",
-      "manifest_sha256": "…",
-      "checkpoint_sha256": "…",
-      "package_sha256": "…",
-      "s3_bucket": "mlops-p3-models-222629887955",
-      "s3_key": "models/clasificador-perro-gato/1.0.0/",
-      "s3_version_id": "…",
-      "published_at": "2026-09-30T18:00:00Z",
-      "selected": true,
-      "card": "texto de la tarjeta (markdown/plain)"
-    }
-  ]
+  "0.1.0": {
+    "s3_path": "s3://mlops-p3-models-222629887955/models/releases/v0.1.0/model_release_v0.1.0.tar.gz",
+    "sha256": "…",            // SHA-256 del tar.gz
+    "VersionId": "…",         // VersionId de S3 al publicar
+    "run_id": "b828e0…",
+    "checkpoint_sha256": "…",
+    "data_release": "v0.1.1",  // versión del DATASET
+    "published_at": "2026-10-03T01:26:45+00:00"
+  },
+  "1.0.0": { "…": "run_id 7e7b4a4b… (r02, seleccionada)" }
 }
 ```
 
-`dataset_version` va separada de `version`: la versión del dataset no es la del
-modelo (requisito del #23).
+`dataset_version` (que expone la API desde `data_release`) va separada de
+`version`: la versión del dataset no es la del modelo (requisito del #23). El
+registry **no** trae `manifest_id`, `run_kind`, `selected` ni la tarjeta:
+- `selected` se deriva comparando `run_id` con `reports/selection.json` (P3-11);
+- `manifest_id` y `run_kind` se leen del `package.json`, y la tarjeta de
+  `model_card.md`, ambos **dentro del `.tar.gz`** en S3 (`storage/model_store.py`,
+  cacheado por `VersionId`).
 
 | Ruta | Contrato | Notas |
 |---|---|---|
-| `GET /ml-api/models` | `ModelList` | agrega `head-object` en vivo (`ModelSummary.s3_status`) |
-| `GET /ml-api/models/{version}` | `ModelDetail` | tarjeta + procedencia + URL prefirmada de descarga |
+| `GET /ml-api/models` | `ModelList` o `PendingEndpoint` (P3-14) | agrega `head-object` en vivo (`s3_status`) |
+| `GET /ml-api/models/{version}` | `ModelDetail` | tarjeta + trazabilidad + URL prefirmada |
 | `POST /ml-api/models/active` | `{version}` → `ModelDetail` | 400 si el objeto no existe en S3, 404 si la versión no está en el registry |
 
+`/models` responde `PendingEndpoint` (ticket `P3-14`) solo si todavía no existe
+`models/registry.json`.
+
 La **versión activa para inferencia** (P3-16) vive en
-`reports/models/active_version.json` (`{"active_version": "1.0.0"}`), escrito
-atómicamente por `ml-api`. `ml-api` monta `reports/` en lectura/escritura solo
-por este archivo (`.gitignore`).
+`models/active_version.json` (`{"active_version": "1.0.0"}`), escrito
+atómicamente por `ml-api`. `ml-api` monta `./models` (lectura/escritura) y
+`~/.aws` (solo lectura) con `AWS_PROFILE=mlops-p3`; el `.gitignore` excluye
+`models/active_version.json*`.
 
-### Decisiones abiertas (P3-14 / P3-16)
+### Nota de verificación (P3-16)
 
-- **Ubicación/esquema de `registry.json`:** lo propone P3-15 y lo confirma
-  P3-14 antes de publicar la `0.1.0`.
-- **Bucket de modelos (AWS S3 vs MinIO):** el `head-object` y la URL prefirmada
-  son inyectables (`app/ml_api/server.py`); hoy el proveedor por defecto usa el
-  cliente de `storage/object_store.py`. Si el bucket final es el de AWS
-  (`mlops-p3-models-…` con SSO `mlops-p3`), P3-14 debe aportar el cliente/rol.
-- **`active_version.json` vs una tabla en MariaDB:** si P3-16 prefiere leerlo de
-  la base (como `training_jobs`), se migra sin tocar el contrato HTTP.
+El criterio del #23 «cambiar la versión activa cambia el SHA-256 que carga
+`ml-api`» se cierra con P3-16 (Inference), que todavía no existe: aquí se
+implementa el selector y el rechazo del objeto inexistente, y el resto se
+verifica cuando Inference consuma `active_version.json`.
+
+### Decisión abierta (P3-16)
+
+`active_version.json` vs una tabla en MariaDB: si P3-16 prefiere leerlo de la
+base (como `training_jobs`), se migra sin tocar el contrato HTTP.

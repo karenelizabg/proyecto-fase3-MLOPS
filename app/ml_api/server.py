@@ -1,9 +1,8 @@
 """`ml-api` (P3-03): endpoints HTTP para las 5 pantallas de "Modelo".
 
-`/training/jobs` (P3-09) y `/evaluation` + `/crops` (P3-15) tienen datos reales.
-Experiments (P3-12) lee MLflow; Models (P3-14) e Inference (P3-16) siguen
-respondiendo `PendingEndpoint`: existen como contrato -- para que el frontend
-los pueda consumir ya -- pero sin datos reales todavía.
+`/training/jobs` (P3-09), `/evaluation` + `/crops` (P3-15) y `/models` (P3-15,
+sobre el catálogo de P3-14) tienen datos reales; Experiments (P3-12) lee MLflow.
+Inference (P3-16) sigue respondiendo `PendingEndpoint`.
 
 Mismo patrón que `copilot/server.py`: `create_app(settings)` para pruebas,
 `main()` para producción.
@@ -38,6 +37,8 @@ from ml_api.models import (
     build_list,
     load_registry,
     read_active_version,
+    read_selected_run_id,
+    split_s3_path,
     write_active_version,
 )
 from ml_api.repository import (
@@ -49,7 +50,12 @@ from ml_api.repository import (
 from ml_api.training_jobs import TrainingJobRejected, validate_new_training_job
 from selection.lock import lock_reason
 from storage.db import get_engine
-from storage.object_store import get_minio_client, object_status, presigned_get_url
+from storage.model_store import (
+    get_model_s3_client,
+    head_object,
+    presigned_get_url,
+    read_package_info,
+)
 from storage.settings import Settings
 
 logger = logging.getLogger("ml-api")
@@ -59,16 +65,33 @@ CreateJob = Callable[[str, str, dict, str, str | None], TrainingJob]
 CancelJob = Callable[[str], TrainingJob | None]
 ModelStatusOf = Callable[[ModelEntry], dict | None]
 ModelDownloadUrlOf = Callable[[ModelEntry], str | None]
+ModelPackageInfoOf = Callable[[ModelEntry], dict | None]
 
 
 def _default_model_status_of(entry: ModelEntry) -> dict | None:
-    """`head-object` en vivo (P3-15). Inyectable para no depender de S3 en las
-    pruebas; en producción apunta al bucket del `registry.json`."""
-    return object_status(get_minio_client(), bucket=entry.s3_bucket, key=entry.s3_key)
+    """`head-object` en vivo (P3-15) contra el bucket del `s3_path` de P3-14."""
+    bucket, key = split_s3_path(entry.s3_path)
+    return head_object(get_model_s3_client(), bucket=bucket, key=key)
 
 
 def _default_model_download_url_of(entry: ModelEntry) -> str | None:
-    return presigned_get_url(get_minio_client(), bucket=entry.s3_bucket, key=entry.s3_key)
+    bucket, key = split_s3_path(entry.s3_path)
+    return presigned_get_url(get_model_s3_client(), bucket=bucket, key=key)
+
+
+# La tarjeta y el package.json viajan dentro del `.tar.gz`; descargarlo en cada
+# click del detalle sería un desperdicio, así que se cachea por VersionId.
+_package_info_cache: dict[str, dict] = {}
+
+
+def _default_model_package_info_of(entry: ModelEntry) -> dict | None:
+    bucket, key = split_s3_path(entry.s3_path)
+    cache_key = f"{bucket}/{key}#{entry.VersionId}"
+    if cache_key not in _package_info_cache:
+        _package_info_cache[cache_key] = read_package_info(
+            get_model_s3_client(), bucket=bucket, key=key
+        )
+    return _package_info_cache[cache_key]
 
 
 _PENDING = {
@@ -82,7 +105,7 @@ _PENDING = {
     ),
     "models": PendingEndpoint(
         ticket="P3-14",
-        message="El catálogo de modelos (reports/models/registry.json) todavía no existe; "
+        message="El catálogo de modelos (models/registry.json) todavía no existe; "
         "lo publica P3-14.",
     ),
     "inference": PendingEndpoint(
@@ -104,6 +127,7 @@ def create_app(
     cancel_job: CancelJob | None = None,
     model_status_of: ModelStatusOf | None = None,
     model_download_url_of: ModelDownloadUrlOf | None = None,
+    model_package_info_of: ModelPackageInfoOf | None = None,
 ) -> Starlette:
     settings = settings if settings is not None else Settings()
     list_jobs = list_jobs or (lambda: list_training_jobs(get_engine()))
@@ -122,9 +146,11 @@ def create_app(
     )
     model_status_of = model_status_of or _default_model_status_of
     model_download_url_of = model_download_url_of or _default_model_download_url_of
+    model_package_info_of = model_package_info_of or _default_model_package_info_of
 
-    registry_path = settings.reports_dir / "models" / "registry.json"
-    active_version_path = settings.reports_dir / "models" / "active_version.json"
+    registry_path = settings.models_dir / "registry.json"
+    active_version_path = settings.models_dir / "active_version.json"
+    selection_path = settings.reports_dir / "selection.json"
 
     def health(_: Request) -> JSONResponse:
         return JSONResponse({"status": "ok"})
@@ -213,6 +239,7 @@ def create_app(
         payload = build_list(
             registry,
             active_version=read_active_version(active_version_path),
+            selected_run_id=read_selected_run_id(selection_path),
             status_of=model_status_of,
         )
         return JSONResponse(payload.model_dump(mode="json"))
@@ -229,8 +256,10 @@ def create_app(
                 registry,
                 version,
                 active_version=read_active_version(active_version_path),
+                selected_run_id=read_selected_run_id(selection_path),
                 status_of=model_status_of,
                 download_url_of=model_download_url_of,
+                package_info_of=model_package_info_of,
             )
         except ModelVersionNotFound:
             return JSONResponse({"error": f"no existe la versión {version}"}, status_code=404)
@@ -266,8 +295,10 @@ def create_app(
             registry,
             version,
             active_version=version,
+            selected_run_id=read_selected_run_id(selection_path),
             status_of=model_status_of,
             download_url_of=model_download_url_of,
+            package_info_of=model_package_info_of,
         )
         return JSONResponse(detail.model_dump(mode="json"))
 

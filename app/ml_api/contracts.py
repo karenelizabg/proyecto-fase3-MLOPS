@@ -134,32 +134,19 @@ class TagUpdate(ContractModel):
 # --- P3-15: Models -----------------------------------------------------------
 
 
-# `reports/models/registry.json`: lo produce P3-14 (`publish.py` + `card.py`).
-# Este contrato es la propuesta de P3-15 a P3-14 -- un campo que se agregue de
-# un lado y no del otro es un bug, no una libertad de implementación. La
-# versión del dataset (`dataset_version`) va separada de la del modelo
-# (`version`), requisito explícito del #23.
+# `models/registry.json` es lo que produce P3-14 (`publish.py`, #62): un dict
+# `version -> entrada`. Los nombres de campo son los del registry real
+# (`s3_path`, `sha256`, `VersionId`, `data_release`); no se inventan. El SHA-256
+# del paquete y el `VersionId` los registró `publish.py` al publicar; el estado
+# en vivo de S3 lo agrega P3-15 con `head-object`.
 class ModelEntry(ContractModel):
-    version: str
-    dataset_version: str
+    s3_path: str
+    sha256: str
+    VersionId: str
     run_id: str
-    release: str
-    manifest_id: str
-    manifest_sha256: str
     checkpoint_sha256: str
-    package_sha256: str
-    s3_bucket: str
-    s3_key: str
-    s3_version_id: str | None = None
+    data_release: str
     published_at: datetime
-    selected: bool = False
-    card: str | None = None
-
-
-class ModelRegistry(ContractModel):
-    schema_version: Literal["1.0"]
-    model_name: str
-    versions: list[ModelEntry]
 
 
 class ModelS3Status(ContractModel):
@@ -173,9 +160,9 @@ class ModelSummary(ContractModel):
     version: str
     dataset_version: str
     run_id: str
-    release: str
-    manifest_id: str
     published_at: datetime
+    package_sha256: str
+    registered_version_id: str
     selected: bool
     active: bool
     s3_status: ModelS3Status
@@ -183,28 +170,25 @@ class ModelSummary(ContractModel):
 
 class ModelList(ContractModel):
     status: Literal["ready"] = "ready"
-    model_name: str
     active_version: str | None
     versions: list[ModelSummary]
 
 
 class ModelDetail(ContractModel):
     status: Literal["ready"] = "ready"
-    model_name: str
     version: str
     dataset_version: str
     run_id: str
-    release: str
-    manifest_id: str
-    manifest_sha256: str
-    checkpoint_sha256: str
-    package_sha256: str
-    s3_bucket: str
-    s3_key: str
-    s3_version_id: str | None
     published_at: datetime
+    package_sha256: str
+    registered_version_id: str
+    checkpoint_sha256: str
+    run_kind: str | None
+    manifest_id: str | None
     selected: bool
     active: bool
+    s3_bucket: str
+    s3_key: str
     card: str | None
     download_url: str | None
     s3_status: ModelS3Status

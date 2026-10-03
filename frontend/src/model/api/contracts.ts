@@ -167,8 +167,10 @@ export type EvaluationReport = z.infer<typeof evaluationReportSchema>;
 export type EvaluationResponse = z.infer<typeof evaluationResponseSchema>;
 
 // Espejo de los contratos de Models en app/ml_api/contracts.py (P3-15). El
-// catálogo `reports/models/registry.json` lo produce P3-14; la versión del
-// dataset va separada de la del modelo (requisito del #23).
+// catálogo real es `models/registry.json` (P3-14, #62): un dict `version ->
+// {s3_path, sha256, VersionId, run_id, checkpoint_sha256, data_release,
+// published_at}`. La versión del dataset (`dataset_version` = `data_release`)
+// va separada de la del modelo (requisito del #23).
 export const modelS3StatusSchema = z
   .object({
     exists: z.boolean(),
@@ -183,9 +185,9 @@ export const modelSummarySchema = z
     version: z.string().min(1),
     dataset_version: z.string().min(1),
     run_id: z.string().min(1),
-    release: z.string().min(1),
-    manifest_id: z.string().min(1),
     published_at: z.string().min(1),
+    package_sha256: z.string().min(1),
+    registered_version_id: z.string().min(1),
     selected: z.boolean(),
     active: z.boolean(),
     s3_status: modelS3StatusSchema,
@@ -195,7 +197,6 @@ export const modelSummarySchema = z
 export const modelListSchema = z
   .object({
     status: z.literal("ready"),
-    model_name: z.string().min(1),
     active_version: z.string().nullable(),
     versions: z.array(modelSummarySchema),
   })
@@ -209,21 +210,19 @@ export const modelListResponseSchema = z.discriminatedUnion("status", [
 export const modelDetailSchema = z
   .object({
     status: z.literal("ready"),
-    model_name: z.string().min(1),
     version: z.string().min(1),
     dataset_version: z.string().min(1),
     run_id: z.string().min(1),
-    release: z.string().min(1),
-    manifest_id: z.string().min(1),
-    manifest_sha256: z.string().min(1),
-    checkpoint_sha256: z.string().min(1),
-    package_sha256: z.string().min(1),
-    s3_bucket: z.string().min(1),
-    s3_key: z.string().min(1),
-    s3_version_id: z.string().nullable(),
     published_at: z.string().min(1),
+    package_sha256: z.string().min(1),
+    registered_version_id: z.string().min(1),
+    checkpoint_sha256: z.string().min(1),
+    run_kind: z.string().nullable(),
+    manifest_id: z.string().nullable(),
     selected: z.boolean(),
     active: z.boolean(),
+    s3_bucket: z.string().min(1),
+    s3_key: z.string().min(1),
     card: z.string().nullable(),
     download_url: z.string().nullable(),
     s3_status: modelS3StatusSchema,
