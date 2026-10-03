@@ -51,6 +51,9 @@ COPY crops/ ./crops/
 # P3-06/P3-07: ml-api los necesita para reverificar el manifiesto antes de
 # crear un training_job (P3-09); trainer-worker los necesita para entrenar.
 COPY manifest/ ./manifest/
+COPY selection/ ./selection/
+# P3-16: ml-api necesita CLASSES (el orden cat/dog) para /predict.
+COPY evaluation/ ./evaluation/
 COPY training/ ./training/
 COPY mlflow_ops/ ./mlflow_ops/
 COPY ml_worker/ ./ml_worker/

@@ -1,11 +1,10 @@
-import { PendingPage } from "./PendingPage";
+import { ExperimentsTable } from "@/components/experiments/ExperimentsTable";
 
 export function ExperimentsPage() {
   return (
-    <PendingPage
-      title="Experiments"
-      subtitle="Corridas de la campaña, comparadas sobre MLflow en vivo."
-      path="/experiments"
-    />
+    <div className="p-6">
+      <h1 className="text-2xl font-bold mb-4">Experimentos de MLflow en vivo</h1>
+      <ExperimentsTable experimentId="1" />
+    </div>
   );
 }
