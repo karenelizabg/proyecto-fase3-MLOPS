@@ -15,8 +15,7 @@ export function ExperimentsPage() {
     const controller = new AbortController();
     listExperiments(controller.signal)
       .then((experiments) => {
-        const match =
-          experiments.find((experiment) => experiment.name === EXPERIMENT_NAME) ?? experiments[0];
+        const match = experiments.find((experiment) => experiment.name === EXPERIMENT_NAME);
         if (match) setExperimentId(match.experiment_id);
         else setFailed(true);
       })
@@ -29,7 +28,8 @@ export function ExperimentsPage() {
       <h1 className="text-2xl font-bold mb-4">Experimentos de MLflow en vivo</h1>
       {failed && (
         <p className="text-sm text-ink-muted">
-          No se pudo conectar con ml-api para listar los experimentos.
+          No se pudo cargar el experimento «{EXPERIMENT_NAME}»: ml-api no responde o el experimento
+          no existe.
         </p>
       )}
       {experimentId && <ExperimentsTable experimentId={experimentId} />}

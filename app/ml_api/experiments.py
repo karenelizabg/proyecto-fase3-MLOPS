@@ -27,7 +27,9 @@ async def list_experiments(_: Request) -> JSONResponse:
             ]
         )
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=404)
+        # 502 (no 404): MLflow es un servicio de arriba del ml-api; si no
+        # responde, el fallo no es "este recurso no existe".
+        return JSONResponse({"error": str(e)}, status_code=502)
 
 
 async def list_runs(request: Request) -> JSONResponse:

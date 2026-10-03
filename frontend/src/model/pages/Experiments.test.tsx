@@ -24,9 +24,11 @@ describe("ExperimentsPage (P3-15)", () => {
   it("muestra un error si no existe el experimento clasificador-perro-gato", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        jsonResponse([{ experiment_id: "0", name: "Default", lifecycle_stage: "active" }])
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          jsonResponse([{ experiment_id: "0", name: "Default", lifecycle_stage: "active" }])
+        )
     );
 
     render(<ExperimentsPage />);

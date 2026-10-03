@@ -11,6 +11,31 @@ import { ExperimentCurves } from "./ExperimentCurves";
 
 type ValidityReport = { valid: string[] };
 
+function validityButtonLabel(
+  onlyValid: boolean,
+  validity: ValidityReport | null,
+  failed: boolean
+): string {
+  if (!onlyValid) return "Solo válidas (P3-11)";
+  if (validity === null) {
+    return failed ? "Solo válidas (P3-11): no disponible" : "Cargando corridas válidas…";
+  }
+  return "Mostrar todas";
+}
+
+function emptyMessage(
+  onlyValid: boolean,
+  validity: ValidityReport | null,
+  failed: boolean
+): string {
+  if (onlyValid && validity === null) {
+    return failed
+      ? "No se pudo cargar la lista de corridas válidas."
+      : "Cargando corridas válidas…";
+  }
+  return "Sin corridas para mostrar.";
+}
+
 /**
  * Tabla de la campaña (P3-12/P3-15): las 10 corridas r01–r12 con filtros
  * (campaña / válidas), orden por métrica, curvas por corrida y enlace al run
@@ -19,8 +44,9 @@ type ValidityReport = { valid: string[] };
 export const ExperimentsTable = ({ experimentId }: Readonly<{ experimentId: string }>) => {
   const [runs, setRuns] = useState<MLflowRun[]>([]);
   const [validity, setValidity] = useState<ValidityReport | null>(null);
+  const [validityFailed, setValidityFailed] = useState(false);
   const [onlyCampaign, setOnlyCampaign] = useState(true);
-  const [onlyValid, setOnlyValid] = useState(false);
+  const [onlyValid, setOnlyValid] = useState(true);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
@@ -35,19 +61,25 @@ export const ExperimentsTable = ({ experimentId }: Readonly<{ experimentId: stri
   useEffect(() => {
     const controller = new AbortController();
     fetch("/reports/experiments_validity.json", { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("sin reporte"))))
       .then((report) => {
         const parsed = experimentsValiditySchema.safeParse(report);
-        setValidity(parsed.success ? parsed.data : null);
+        if (parsed.success) setValidity(parsed.data);
+        else setValidityFailed(true);
       })
-      .catch(() => setValidity(null));
+      .catch(() => setValidityFailed(true));
     return () => controller.abort();
   }, []);
 
   const displayedRuns = useMemo(() => {
     let processed = runs;
     if (onlyCampaign) processed = filterCampaign(processed);
-    if (onlyValid && validity) processed = filterValid(processed, new Set(validity.valid));
+    if (onlyValid) {
+      // Sin la lista de válidas no se muestran corridas: enseñar todas con la
+      // etiqueta "solo válidas" sería engañoso.
+      if (validity === null) return [];
+      processed = filterValid(processed, new Set(validity.valid));
+    }
     return sortByMetric(processed, "best_val_loss", sortOrder);
   }, [runs, onlyCampaign, onlyValid, validity, sortOrder]);
 
@@ -67,7 +99,7 @@ export const ExperimentsTable = ({ experimentId }: Readonly<{ experimentId: stri
           className="rounded border px-4 py-2 text-sm"
           disabled={validity === null}
         >
-          {onlyValid ? "Mostrar no válidas" : "Solo válidas (P3-11)"}
+          {validityButtonLabel(onlyValid, validity, validityFailed)}
         </button>
         <button
           type="button"
@@ -121,7 +153,7 @@ export const ExperimentsTable = ({ experimentId }: Readonly<{ experimentId: stri
           {displayedRuns.length === 0 && (
             <tr>
               <td className="border p-3 text-center text-ink-muted" colSpan={5}>
-                Sin corridas para mostrar.
+                {emptyMessage(onlyValid, validity, validityFailed)}
               </td>
             </tr>
           )}
