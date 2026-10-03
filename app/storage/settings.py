@@ -82,13 +82,14 @@ class Settings(BaseSettings):
     # basta confiar en que `manifest_meta.json` ya lo garantizó al construirse).
     derived_dir: Path
 
-    # P3-15: `models/registry.json` (P3-14) y la versión activa para inferencia.
-    # En Docker se monta `./models` en `/app/models` (MODELS_DIR); en local el
-    # default es la raíz del repo (`app/../models`).
+    # P3-15/P3-16: ml-api lee `models/registry.json` (lo publica `publish.py`,
+    # P3-14) para saber qué versión está activa y de dónde bajarla de S3; P3-15
+    # además escribe ahí `active_version.json`. Montado aparte, no horneado en
+    # la imagen (docker-compose.yml): publicar no debe esperar a reconstruir.
     models_dir: Path = APP_ROOT.parent / "models"
 
-    # P3-14/P3-15: el bucket de modelos vive en AWS S3 y se accede con el perfil
-    # SSO del equipo (el rol MLOpsP3). Vacío = cadena de credenciales por defecto.
+    # P3-15: el bucket de modelos vive en AWS S3 y se accede con el perfil SSO
+    # del equipo (rol MLOpsP3). Vacío = cadena de credenciales por defecto.
     aws_profile: str | None = None
     aws_region: str = "us-east-1"
 

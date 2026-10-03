@@ -249,20 +249,25 @@ services:
       <<: *pipeline-env
       MLFLOW_TRACKING_URI: http://mlflow:5000
       ML_API_HOST: 0.0.0.0
-      # P3-15: catálogo y versión activa de Models.
+      # P3-15/P3-16: catálogo de P3-14 (models/registry.json) y versión activa;
+      # el bucket de modelos vive en AWS S3 (docs/decisiones-proyecto3.md,
+      # sección 9) y se usa el mismo perfil SSO que trainer-worker.
       MODELS_DIR: /app/models
-      # El bucket de modelos vive en AWS S3 (docs/decisiones-proyecto3.md,
-      # sección 9); se usa el mismo perfil SSO que trainer-worker.
       AWS_PROFILE: ${AWS_PROFILE:-mlops-p3}
     volumes:
       # P3-09: `derived` solo lectura -- ml-api valida (manifest.csv), nunca
       # escribe el dataset derivado.
       - ./data/derived:/app/data/derived:ro
       - ./reports:/app/reports:ro
-      # P3-15: catálogo de P3-14 (lectura) + `active_version.json` (escritura).
+      # P3-15/P3-16: catálogo de P3-14 (lectura) + `active_version.json` que
+      # escribe P3-15; montado aparte, no horneado en la imagen -- publicar una
+      # versión nueva no debe esperar a reconstruir ml-api.
       - ./models:/app/models
-      # Lectura/escritura: botocore refresca el token SSO en ~/.aws/sso/cache;
-      # con :ro falla con "Read-only file system" al hacer head-object.
+      # NO ":ro": nunca credenciales estáticas horneadas en la imagen
+      # (M2/P3-00b, mismo perfil del equipo que trainer-worker), pero con
+      # `:ro` botocore no puede refrescar/cachear el token SSO al usarlo
+      # -- probado real: "OSError: Read-only file system" en
+      # ~/.aws/sso/cache/*.tmp en cuanto boto3 intenta descargar de S3.
       - ~/.aws:/home/appuser/.aws
     restart: on-failure:5
 

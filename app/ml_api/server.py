@@ -1,8 +1,9 @@
 """`ml-api` (P3-03): endpoints HTTP para las 5 pantallas de "Modelo".
 
-`/training/jobs` (P3-09), `/evaluation` + `/crops` (P3-15) y `/models` (P3-15,
-sobre el catálogo de P3-14) tienen datos reales; Experiments (P3-12) lee MLflow.
-Inference (P3-16) sigue respondiendo `PendingEndpoint`.
+`/training/jobs` (P3-09), `/experiments/*`, `/evaluation` + `/crops` (P3-15),
+`/models` (P3-15, sobre el catálogo de P3-14) y `/predict` (P3-16, contra el
+paquete publicado en S3) tienen datos reales. El GET de `/inference` sigue
+respondiendo `PendingEndpoint`.
 
 Mismo patrón que `copilot/server.py`: `create_app(settings)` para pruebas,
 `main()` para producción.
@@ -29,6 +30,13 @@ from ml_api.contracts import (
 )
 from ml_api.evaluation import build_evaluation_report
 from ml_api.experiments import get_metric_history, list_runs, update_run_tag
+from ml_api.inference import (
+    FetchCrop,
+    LoadModel,
+    fetch_crop_from_annotation,
+    load_active_model,
+    predict_route,
+)
 from ml_api.models import (
     ModelObjectMissing,
     ModelVersionNotFound,
@@ -131,6 +139,8 @@ def create_app(
     model_status_of: ModelStatusOf | None = None,
     model_download_url_of: ModelDownloadUrlOf | None = None,
     model_package_info_of: ModelPackageInfoOf | None = None,
+    load_model: LoadModel | None = None,
+    fetch_crop: FetchCrop | None = None,
 ) -> Starlette:
     settings = settings if settings is not None else Settings()
     list_jobs = list_jobs or (lambda: list_training_jobs(get_engine()))
@@ -150,6 +160,8 @@ def create_app(
     model_status_of = model_status_of or _default_model_status_of
     model_download_url_of = model_download_url_of or _default_model_download_url_of
     model_package_info_of = model_package_info_of or _default_model_package_info_of
+    load_model = load_model or load_active_model
+    fetch_crop = fetch_crop or fetch_crop_from_annotation
 
     registry_path = settings.models_dir / "registry.json"
     active_version_path = settings.models_dir / "active_version.json"
@@ -330,6 +342,7 @@ def create_app(
             Route("/models/active", set_active_model, methods=["POST"]),
             Route("/models/{version}", model_detail, methods=["GET"]),
             Route("/inference", pending("inference"), methods=["GET"]),
+            Route("/predict", predict_route(load_model, fetch_crop), methods=["POST"]),
         ],
         middleware=[
             Middleware(

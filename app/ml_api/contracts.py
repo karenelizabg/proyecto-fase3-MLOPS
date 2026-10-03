@@ -196,3 +196,15 @@ class ModelDetail(ContractModel):
 
 class SetActiveVersionRequest(ContractModel):
     version: str
+
+
+class PredictionResponse(ContractModel):
+    """`POST /predict` (P3-16, #24): resultado de clasificar una imagen con el
+    modelo activo. `probabilities` va por nombre de clase (`{"cat": 0.9,
+    "dog": 0.1}`), no por índice posicional -- es la respuesta HTTP que
+    consume el frontend, no una fila de `evaluation.contracts.Prediction`."""
+
+    predicted_label: str
+    probabilities: dict[str, float]
+    model_version: str
+    checkpoint_sha256: str

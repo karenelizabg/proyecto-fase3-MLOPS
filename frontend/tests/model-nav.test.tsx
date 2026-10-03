@@ -85,7 +85,7 @@ describe("SPEC-P3-03-NAV - las 5 rutas de Modelo existen y se alcanzan desde el 
 
     fireEvent.click(screen.getByRole("link", { name: "Inference" }));
     expect(await screen.findByRole("heading", { name: "Inference" })).toBeInTheDocument();
-    expect(await screen.findByText(/Pendiente/)).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Imagen nueva" })).toBeInTheDocument();
   });
 
   it("las páginas pendientes y Experiments renderizan correctamente aunque ml-api no responda", async () => {

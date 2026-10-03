@@ -87,6 +87,16 @@ export const createTrainingJobRequestSchema = z
     { message: "grid_row debe ser r01–r12 para run_kind 'campaign'", path: ["grid_row"] }
   );
 
+// Espejo de `app/ml_api/contracts.py::PredictionResponse` (P3-16, #24).
+export const predictionResponseSchema = z
+  .object({
+    predicted_label: z.string().min(1),
+    probabilities: z.record(z.string(), z.number().min(0).max(1)),
+    model_version: z.string().min(1),
+    checkpoint_sha256: z.string().min(1),
+  })
+  .strict();
+
 export const pendingEndpointSchema = z
   .object({
     status: z.literal("pending"),
@@ -232,7 +242,7 @@ export const modelDetailSchema = z
 export type ModelSummary = z.infer<typeof modelSummarySchema>;
 export type ModelListResponse = z.infer<typeof modelListResponseSchema>;
 export type ModelDetail = z.infer<typeof modelDetailSchema>;
-
+export type PredictionResponse = z.infer<typeof predictionResponseSchema>;
 export type TrainingJob = z.infer<typeof trainingJobSchema>;
 export type TrainingJobList = z.infer<typeof trainingJobListSchema>;
 export type PendingEndpoint = z.infer<typeof pendingEndpointSchema>;
