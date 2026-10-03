@@ -29,7 +29,7 @@ from ml_api.contracts import (
     TrainingJobList,
 )
 from ml_api.evaluation import build_evaluation_report
-from ml_api.experiments import get_metric_history, list_runs, update_run_tag
+from ml_api.experiments import get_metric_history, list_experiments, list_runs, update_run_tag
 from ml_api.inference import (
     FetchCrop,
     LoadModel,
@@ -326,6 +326,7 @@ def create_app(
             Route("/training/jobs", training_jobs, methods=["GET"]),
             Route("/training/jobs", create_training_job_route, methods=["POST"]),
             Route("/training/jobs/{job_id}/cancel", cancel_training_job_route, methods=["POST"]),
+            Route("/experiments", list_experiments, methods=["GET"]),
             Route("/experiments/{experiment_id}/runs", list_runs, methods=["GET"]),
             Route(
                 "/experiments/runs/{run_id}/metrics/{metric_key}",

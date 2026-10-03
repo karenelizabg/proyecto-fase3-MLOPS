@@ -599,9 +599,10 @@ que el portal funcione de punta a punta:
 ## Proyecto 3 — clasificador perro/gato
 
 Etapa 3: clasificador binario `cat`/`dog` sobre los recortes del dataset. La
-sección completa la integra el dueño de P3-18; aquí documentamos las páginas
-**Evaluation** y **Models** (Uriel, P3-11/P3-13/P3-15). El recorrido de
-Experiments (P3-12) e Inference (P3-16) va en la sección de su dueño.
+sección completa la integra el dueño de P3-18. Aquí documentamos **Evaluation**
+y **Models** (Uriel, P3-11/P3-13/P3-15), el arreglo de **Experiments** para
+resolver el experimento por nombre, la **verificación de datos y compuerta
+(M2)** y la **verificación manual de Inference**.
 
 ### Recorrido por las páginas — Evaluation y Models
 
@@ -658,6 +659,51 @@ Requisitos: `docker compose up` (ver arriba) y, para datos y artefactos,
 - **P3-15** — páginas **Evaluation y Models** con datos reales, endpoint
   `/ml-api/models` sobre el registry de P3-14, versión activa y manejo de
   errores de S3.
+
+### Experiments (`/experiments`)
+
+- La página **resuelve el experimento por nombre** (`clasificador-perro-gato`)
+  con `GET /ml-api/experiments`; ya no fija `experimentId="1"` a mano.
+- Muestra la **campaña** (corridas `r01`–`r12`) con filtros **campaña** y
+  **solo válidas** (según `reports/experiments_validity.json`, P3-11), orden por
+  `best_val_loss`, y curvas `val_loss`/`train_loss` por corrida.
+- El `run_id` de cada fila enlaza directo al run en **MLflow**
+  (<http://localhost:5050>).
+
+### Inference (`/inference`) — verificación manual
+
+Pasos probados sobre el modelo activo (endpoint `POST /ml-api/predict`):
+
+1. **Archivo inválido** (p. ej. un `.txt` o un JPEG corrupto) → `400` con
+   "tipo de archivo no soportado" / "no se pudo decodificar la imagen"; no se
+   carga el modelo.
+2. **Probabilidades**: la respuesta trae `probabilities` por clase
+   (`cat`/`dog`) y **suman 1 ± 1e-6**.
+3. **Enviar a cola de anotación**: crea una imagen real en estado `pending`
+   (reusa `image-upload.service.ts`) y guarda la sugerencia en
+   `inference_submissions` con `predicted_label`, `probabilities`,
+   `model_version` y `checkpoint_sha256`.
+
+La cobertura automática vive en `app/tests/test_p3_16.py` (suma de
+probabilidades, archivo inválido `400`, cambio de versión activa) y en
+`backend/tests/inference-submission.test.ts` (validación de la sugerencia).
+
+### Verificación de datos y compuerta (M2)
+
+- **Compuerta del release `v0.1.1` = `warning`, tratada como aprobada.** La
+  política de P2 (`app/policies/quality.yaml`) marca como `fail` solo
+  `min_images_per_class`, `degenerate_boxes` y `cross_split_leakage`; los demás
+  checks son `warn`. Un `warn` que no pasa deja el reporte en `warning`, y ese
+  estado **sí cuenta como aprobado** para el proyecto
+  (`docs/decisiones-proyecto3.md`, secciones 1 y "Política de compuerta"): existe
+  `reports/.quality_gate.passed` y `manifest_meta.json` referencia
+  `quality_reference.status = warning`. Por eso **no aplica el tope de 60**.
+- **Margen de clases (`cat` 301 / `dog` 300 originales).** Los recortes salen de
+  cajas válidas; **no se excluyó ninguna** caja en `v0.1.1`
+  (`data/derived/crops/exclusions.csv` solo tiene encabezado), así que `dog`
+  sigue con **300 imágenes originales ≥ 300** y `cat` con 301
+  (`reports/manifests/v0.1.1/counts.json`). El mínimo exacto de `dog` es lo que
+  la compuerta vigila: una sola caja degenerada adicional lo dejaría en 299.
 
 ## P2-04 — MinIO local y remotes DVC
 
