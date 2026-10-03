@@ -596,14 +596,85 @@ que el portal funcione de punta a punta:
   desarrollo. `VITE_API_BASE_URL` puede dejarse en `/api`; en producción se
   apunta a la URL real del backend.
 
-## Proyecto 3 — clasificador perro/gato
+## Proyecto 3 — Clasificación cat/dog con MLOps (P3-18)
 
-Etapa 3: clasificador binario `cat`/`dog` sobre los recortes del dataset. La
-sección completa la integra el dueño de P3-18; aquí documentamos las páginas
-**Evaluation** y **Models** (Uriel, P3-11/P3-13/P3-15). El recorrido de
-Experiments (P3-12) e Inference (P3-16) va en la sección de su dueño.
+**Línea base de P2:** tag `p2-final-baseline`, commit `19fb5629ebfb5bf9c3df4f51837037f970be0fe0`.
+Trazabilidad completa: [`docs/trazabilidad.md`](docs/trazabilidad.md).
 
-### Recorrido por las páginas — Evaluation y Models
+### 1. Acceso a AWS y datos (SSO + DVC)
+
+```bash
+aws sso login --profile mlops-p3
+aws sts get-caller-identity --profile mlops-p3   # el Arn debe contener AWSReservedSSO_MLOpsP3_
+cp .env.example .env                              # completa MARIADB_*, MINIO_*, AWS_PROFILE=mlops-p3
+```
+
+Detalle del SSO en [Configurar IAM Identity Center / SSO](#6-configurar-iam-identity-center--sso).
+
+```bash
+dvc pull -r prod data/raw/images.dvc data/raw/annotations.dvc   # datos
+dvc pull -r prod mlflow-store.dvc                                # corridas de MLflow
+```
+
+- El manifiesto (`reports/manifests/v0.1.1/`) y los reportes viajan en git.
+- `data/derived/` (recortes y `manifest.csv`) es salida de las etapas `crops` y
+  `manifest` de `dvc.yaml`. En un clon limpio, tras bajar `data/raw`, se
+  regenera con:
+
+  ```bash
+  dvc repro
+  ```
+
+  Debe terminar con el manifiesto `v0.1.1-53fc84fdaa07` (SHA-256 `53fc84fd…`,
+  668 recortes: 464 train, 131 val, 73 test) y `dvc status` en "up to date".
+
+### 2. Levantar todo
+
+```bash
+docker compose up --build
+```
+
+| Servicio | URL |
+|---|---|
+| Frontend (portal y páginas de modelo) | http://localhost:8080 |
+| Backend Node | http://localhost:3100 |
+| MLflow | http://localhost:5050 |
+| ml-api (vía nginx) | http://localhost:8080/ml-api/health |
+| MinIO consola | http://localhost:9001 |
+
+### 3. Modo SMOKE
+
+Una corrida corta (`run_kind: "smoke"`, sin `grid_row`) que valida el flujo completo sin
+esperar la campaña. Se lanza desde la página Training con `smoke` seleccionado. Usa
+`app/config_smoke.json` (Adam, lote 32, imagen 128 px, hasta 15 épocas con paciencia 3) y
+tarda unos **4 min** (medido en `docs/campana-experimentos.md`). No cuenta para la selección
+del candidato: solo cuenta `campaign`.
+
+### 4. Recorrido por las 5 páginas
+
+Portal: <http://localhost:8080>. Todas las rutas cuelgan de ahí.
+
+| Página | Ruta | Qué ver |
+|---|---|---|
+| Training | `/model/training` | elegir `smoke`, "Lanzar entrenamiento", **recargar la página** y ver que el trabajo y su progreso siguen ahí (viven en MariaDB) |
+| Experiments | `/experiments` | corridas de MLflow; abrir el mismo `run_id` en <http://localhost:5050> |
+| Evaluation | `/evaluation` | métricas sobre el test sellado (detalle abajo) |
+| Models | `/models` | versiones `0.1.0` y `1.0.0`, SHA-256, estado en S3 y versión activa (detalle abajo) |
+| Inference | `/inference` | clasificar una **imagen nueva** o un **recorte** existente (detalle abajo) |
+
+#### Inference (`/inference`, P3-16)
+
+- Dos modos: **imagen nueva** (subir un archivo) y **recorte** (uno del dataset).
+- La respuesta trae `predicted_label`, `probabilities` por clase (`cat`, `dog`),
+  `model_version` y `checkpoint_sha256` de la versión activa.
+- **Archivo inválido:** solo JPEG y PNG, de hasta 5 MB; cualquier otra cosa se
+  rechaza con un 400 y el mensaje se muestra en la página.
+- **Enviar a la cola de anotación** (solo en imagen nueva): crea la imagen en el
+  portal para anotarla; la página confirma con "Enviada a la cola (imagen #N)".
+- El paquete se baja de S3 con `AWS_PROFILE`, se verifica su SHA-256 y se cachea
+  por versión: la primera predicción tras arrancar tarda más que las siguientes.
+
+### Detalle de Evaluation y Models (P3-11, P3-13, P3-15)
 
 Requisitos: `docker compose up` (ver arriba) y, para datos y artefactos,
 `dvc pull`. Portal: <http://localhost:8080>; MLflow: <http://localhost:5050>.
@@ -641,7 +712,7 @@ Requisitos: `docker compose up` (ver arriba) y, para datos y artefactos,
   `checkpoint_sha256` que devuelve la predicción. Una versión cuyo objeto no
   existe en S3 **se rechaza** (no se marca como activa).
 
-#### Demo corta
+#### Demo corta de Models
 
 1. `http://localhost:8080/evaluation` → cifras, matriz y galería.
 2. `http://localhost:8080/models` → abrir `1.0.0`, "Marcar como activa".
@@ -658,6 +729,32 @@ Requisitos: `docker compose up` (ver arriba) y, para datos y artefactos,
 - **P3-15** — páginas **Evaluation y Models** con datos reales, endpoint
   `/ml-api/models` sobre el registry de P3-14, versión activa y manejo de
   errores de S3.
+
+### 5. Pruebas
+
+```bash
+cd app && uv sync --locked --no-build --group ml
+uv run --locked --no-build ruff check . && uv run --locked --no-build ruff format --check .
+uv run --locked --no-build --group ml pytest -q
+cd ../frontend && npm ci --ignore-scripts && npm run lint && npm run typecheck && npm test && npm run build
+cd ../backend  && npm ci --ignore-scripts && npm run lint && npm run typecheck && npm test && npm run build
+```
+
+### 6. Cómo verifica S3 el profesor
+
+Bucket `mlops-p3-models-222629887955` (versionado activo). El registro `models/registry.json`
+guarda, por versión, key, `VersionId` y SHA-256 del paquete.
+
+```bash
+aws s3api list-object-versions --bucket mlops-p3-models-222629887955 --prefix models/releases/ --profile mlops-p3
+cd app && uv run python verify_reload.py   # descarga por VersionId y compara SHA-256; código 1 si algo no coincide
+```
+
+Evidencia: [`docs/evidencia-recarga.md`](docs/evidencia-recarga.md).
+
+### 7. Cierre de entrega
+
+Tag `p3-entrega` en el commit de la demo; CI en verde; `git status` y `dvc status` limpios.
 
 ## P2-04 — MinIO local y remotes DVC
 
