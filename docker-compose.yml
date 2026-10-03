@@ -248,11 +248,24 @@ services:
       <<: *pipeline-env
       MLFLOW_TRACKING_URI: http://mlflow:5000
       ML_API_HOST: 0.0.0.0
+      MODELS_DIR: /app/models
+      # P3-16: POST /predict baja el paquete publicado por P3-14 de S3 real
+      # (no MinIO) con este perfil -- mismo mecanismo que ya usa trainer-worker.
+      AWS_PROFILE: ${AWS_PROFILE:?Define AWS_PROFILE en .env (el perfil SSO del equipo, ej. mlops-p3)}
     volumes:
       # P3-09: solo lectura -- ml-api valida (reports/releases, manifest.csv),
       # nunca escribe el dataset derivado.
       - ./data/derived:/app/data/derived:ro
       - ./reports:/app/reports:ro
+      # P3-16: registry.json (P3-14) montado aparte, no horneado en la imagen
+      # -- publicar una versión nueva no debe esperar a reconstruir ml-api.
+      - ./models:/app/models:ro
+      # NO ":ro": nunca credenciales estáticas horneadas en la imagen
+      # (M2/P3-00b, mismo perfil del equipo que trainer-worker), pero con
+      # `:ro` botocore no puede refrescar/cachear el token SSO al usarlo
+      # -- probado real: "OSError: Read-only file system" en
+      # ~/.aws/sso/cache/*.tmp en cuanto boto3 intenta descargar de S3.
+      - ~/.aws:/home/appuser/.aws
     restart: on-failure:5
 
 volumes:
