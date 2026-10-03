@@ -12,7 +12,11 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
-function MetricCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function MetricCard({
+  label,
+  value,
+  hint,
+}: Readonly<{ label: string; value: string; hint?: string }>) {
   return (
     <div className="rounded-2xl border border-border bg-surface p-4">
       <p className="text-xs text-ink-muted">{label}</p>
@@ -22,7 +26,7 @@ function MetricCard({ label, value, hint }: { label: string; value: string; hint
   );
 }
 
-function Provenance({ report }: { report: EvaluationReport }) {
+function Provenance({ report }: Readonly<{ report: EvaluationReport }>) {
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-2xl border border-border bg-surface p-4 text-sm">
       <dt className="text-ink-muted">Candidato</dt>
@@ -43,7 +47,7 @@ function Provenance({ report }: { report: EvaluationReport }) {
   );
 }
 
-function ConfusionMatrix({ report }: { report: EvaluationReport }) {
+function ConfusionMatrix({ report }: Readonly<{ report: EvaluationReport }>) {
   return (
     <div className="flex flex-col gap-2 overflow-x-auto">
       <h2 className="text-sm font-medium text-ink">
@@ -84,7 +88,7 @@ function ConfusionMatrix({ report }: { report: EvaluationReport }) {
   );
 }
 
-function Gallery({ title, examples }: { title: string; examples: EvaluationExample[] }) {
+function Gallery({ title, examples }: Readonly<{ title: string; examples: EvaluationExample[] }>) {
   if (examples.length === 0) {
     return (
       <div className="flex flex-col gap-2">
@@ -124,7 +128,7 @@ function Gallery({ title, examples }: { title: string; examples: EvaluationExamp
   );
 }
 
-function ReportView({ report }: { report: EvaluationReport }) {
+function ReportView({ report }: Readonly<{ report: EvaluationReport }>) {
   return (
     <>
       <Provenance report={report} />

@@ -187,6 +187,8 @@ export const modelS3StatusSchema = z
     version_id: z.string().nullable(),
     size_bytes: z.number().int().nullable(),
     last_modified: z.string().nullable(),
+    // P3-15: la verificación en vivo de esta versión falló (red, SSO, permisos).
+    error: z.string().nullable().default(null),
   })
   .strict();
 
