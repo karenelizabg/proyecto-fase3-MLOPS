@@ -1,9 +1,9 @@
 // @vitest-environment node
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { reportsPlugin } from "../reports-plugin";
+import { readReport, reportsPlugin } from "../reports-plugin";
 
 /**
  * P3-19: el servidor de desarrollo debe servir `predictions.csv` (enlace de
@@ -109,4 +109,25 @@ it.each([
   const result = await requestReport(url);
   expect(result.status).toBe(404);
   expect(result.body).not.toContain("secret");
+});
+
+// Regresión: `evaluation/` es la única carpeta con un archivo no-JSON público. Si
+// fuera un enlace hacia fuera de `reports/`, el `realpath` debe rechazarlo.
+// `"junction"` es un directorio-junction en Windows (no pide permisos de
+// administrador, a diferencia de un symlink) y se ignora en Linux/macOS, donde
+// crea un symlink normal.
+it("no sirve predictions.csv si evaluation/ es un enlace hacia fuera de reports/", async () => {
+  const escapeTemp = await mkdtemp(path.join(tmpdir(), "p319-escape-"));
+  try {
+    const escapeRoot = path.join(escapeTemp, "reports");
+    const outside = path.join(escapeTemp, "outside");
+    await mkdir(escapeRoot, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    await writeFile(path.join(outside, "predictions.csv"), "secret\n");
+    await symlink(outside, path.join(escapeRoot, "evaluation"), "junction");
+
+    await expect(readReport(escapeRoot, CSV_URL)).rejects.toThrow("Report outside root");
+  } finally {
+    await rm(escapeTemp, { recursive: true, force: true });
+  }
 });
