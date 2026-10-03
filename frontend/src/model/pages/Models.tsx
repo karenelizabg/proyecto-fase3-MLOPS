@@ -15,31 +15,49 @@ type DetailState =
   | { status: "error"; message: string }
   | { status: "success"; data: ModelDetail };
 
-function Tag({ children, tone }: { children: ReactNode; tone?: "active" | "selected" }) {
-  const classes =
-    tone === "active"
-      ? "bg-status-done-soft text-status-done"
-      : tone === "selected"
-        ? "bg-accent-lilac-soft text-accent-lilac"
-        : "bg-surface text-ink-muted";
+const TAG_CLASSES = {
+  active: "bg-status-done-soft text-status-done",
+  selected: "bg-accent-lilac-soft text-accent-lilac",
+  default: "bg-surface text-ink-muted",
+} as const;
+
+function Tag({ children, tone }: Readonly<{ children: ReactNode; tone?: "active" | "selected" }>) {
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${classes}`}
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${
+        TAG_CLASSES[tone ?? "default"]
+      }`}
     >
       {children}
     </span>
   );
 }
 
+function s3StatusLabel(status: ModelSummary["s3_status"]): string {
+  if (status.error) return `S3: ${status.error}`;
+  if (status.exists) return `S3: existe (VersionId ${status.version_id ?? "—"})`;
+  return "S3: objeto inexistente";
+}
+
+function s3StatusClass(status: ModelSummary["s3_status"]): string {
+  return status.exists ? "text-status-done" : "text-status-pending";
+}
+
+function activateLabel(active: boolean, activating: boolean): string {
+  if (active) return "Ya es la activa";
+  if (activating) return "Marcando…";
+  return "Marcar como activa";
+}
+
 function VersionCard({
   model,
   selected,
   onSelect,
-}: {
+}: Readonly<{
   model: ModelSummary;
   selected: boolean;
   onSelect: () => void;
-}) {
+}>) {
   return (
     <button
       type="button"
@@ -57,12 +75,8 @@ function VersionCard({
       <p className="text-xs text-ink-muted">
         run {model.run_id.slice(0, 8)} · paquete {model.package_sha256.slice(0, 12)}…
       </p>
-      <p
-        className={`text-xs ${model.s3_status.exists ? "text-status-done" : "text-status-pending"}`}
-      >
-        {model.s3_status.exists
-          ? `S3: existe (VersionId ${model.s3_status.version_id ?? "—"})`
-          : "S3: objeto inexistente"}
+      <p className={`text-xs ${s3StatusClass(model.s3_status)}`}>
+        {s3StatusLabel(model.s3_status)}
       </p>
     </button>
   );
@@ -73,12 +87,12 @@ function DetailPanel({
   activating,
   actionError,
   onActivate,
-}: {
+}: Readonly<{
   detail: ModelDetail;
   activating: boolean;
   actionError: string;
   onActivate: () => void;
-}) {
+}>) {
   return (
     <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -128,9 +142,13 @@ function DetailPanel({
           disabled={activating || detail.active || !detail.s3_status.exists}
           className="rounded-full bg-ink px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
         >
-          {detail.active ? "Ya es la activa" : activating ? "Marcando…" : "Marcar como activa"}
+          {activateLabel(detail.active, activating)}
         </button>
       </div>
+
+      {detail.s3_status.error && (
+        <p className="text-sm text-status-pending">{detail.s3_status.error}</p>
+      )}
 
       {actionError && <p className="text-sm text-status-pending">{actionError}</p>}
     </div>

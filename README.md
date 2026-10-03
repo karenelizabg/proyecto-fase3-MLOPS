@@ -596,6 +596,69 @@ que el portal funcione de punta a punta:
   desarrollo. `VITE_API_BASE_URL` puede dejarse en `/api`; en producción se
   apunta a la URL real del backend.
 
+## Proyecto 3 — clasificador perro/gato
+
+Etapa 3: clasificador binario `cat`/`dog` sobre los recortes del dataset. La
+sección completa la integra el dueño de P3-18; aquí documentamos las páginas
+**Evaluation** y **Models** (Uriel, P3-11/P3-13/P3-15). El recorrido de
+Experiments (P3-12) e Inference (P3-16) va en la sección de su dueño.
+
+### Recorrido por las páginas — Evaluation y Models
+
+Requisitos: `docker compose up` (ver arriba) y, para datos y artefactos,
+`dvc pull`. Portal: <http://localhost:8080>; MLflow: <http://localhost:5050>.
+
+#### Evaluation (`/evaluation`)
+
+- **Con la selección sin cerrar** (P3-11) la API responde
+  `selection_not_closed` y la página dice "Selección no cerrada": no hay datos
+  que mostrar todavía.
+- **Con la selección sellada** (`reports/selection.json`), la API une el sello
+  con `reports/evaluation/{metrics,analysis}.json` (P3-13) y la página muestra:
+  el candidato `r02` (`run_id 7e7b4a4b…`), el release `v0.1.1`, el manifiesto,
+  **accuracy 0.9863** (72/73), **F1 macro 0.9862**, la tabla por clase, la
+  matriz de confusión (filas = real, columnas = predicha), el **baseline
+  0.5342**, una galería de aciertos y errores con el **recorte real**
+  (`GET /ml-api/crops/<crop_id>`) y la descarga de `predictions.csv`.
+- Las cifras son las mismas que quedaron en MLflow y que recalcula
+  `app/recompute.py`; la evaluación se corrió **una sola vez** sobre el test
+  (ver `docs/evaluacion-final.md`).
+
+#### Models (`/models`)
+
+- Lista las versiones publicadas en `models/registry.json` (P3-14): **`0.1.0`**
+  (ensayo del smoke, no seleccionada) y **`1.0.0`** (r02, la candidata
+  seleccionada).
+- Por versión muestra la tarjeta, el `run_id`, el **release de datos**
+  (`data_release`, p. ej. `v0.1.1`), el manifiesto, el `bucket`/`key`, el
+  `VersionId` y el SHA-256 del paquete, el **estado en vivo en S3**
+  (`head-object`) y la **descarga por URL prefirmada**.
+- La **versión del modelo** (`0.1.0`/`1.0.0`) es distinta de la **versión del
+  dataset** (`v0.1.1`); la página no las mezcla.
+- **Elegir versión activa** escribe `models/active_version.json` (P3-15).
+  `/predict` (P3-16) lee ese archivo y carga el paquete de esa versión, así que
+  cambiar la versión activa cambia el `model_version` y el
+  `checkpoint_sha256` que devuelve la predicción. Una versión cuyo objeto no
+  existe en S3 **se rechaza** (no se marca como activa).
+
+#### Demo corta
+
+1. `http://localhost:8080/evaluation` → cifras, matriz y galería.
+2. `http://localhost:8080/models` → abrir `1.0.0`, "Marcar como activa".
+3. En Inference, predecir una imagen: la respuesta trae `model_version 1.0.0` y
+   su `checkpoint_sha256`. Cambiar a `0.1.0` y repetir: el SHA cambia.
+
+#### Qué aportó este frente
+
+- **P3-11** — validación de la campaña y **selección por validación** con
+  candado (`app/selection/`, `reports/selection.json`,
+  `docs/seleccion-candidato.md`).
+- **P3-13** — **evaluación final única** sobre test: `app/final.py`,
+  métricas y análisis (`reports/evaluation/`) y `app/recompute.py`, en TDD.
+- **P3-15** — páginas **Evaluation y Models** con datos reales, endpoint
+  `/ml-api/models` sobre el registry de P3-14, versión activa y manejo de
+  errores de S3.
+
 ## P2-04 — MinIO local y remotes DVC
 
 Esta sección contiene los detalles del remote DVC opcional de desarrollo. Para

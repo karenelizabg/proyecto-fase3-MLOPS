@@ -87,12 +87,18 @@ def read_package_info(client, *, bucket: str, key: str, version_id: str | None =
         kwargs["VersionId"] = version_id
     stream = client.get_object(**kwargs)["Body"]
     info: dict = {"card": None, "run_kind": None, "manifest_id": None}
+    found: set[str] = set()
     with tarfile.open(fileobj=stream, mode="r|gz") as tar:
         for member in tar:
             if member.name == "model_card.md":
                 info["card"] = tar.extractfile(member).read().decode("utf-8")
+                found.add("card")
             elif member.name == "package.json":
                 package = json.loads(tar.extractfile(member).read().decode("utf-8"))
                 info["run_kind"] = package.get("run_kind")
                 info["manifest_id"] = package.get("manifest_id")
+                found.add("package")
+            if found == {"card", "package"}:
+                # Ya se leyeron los dos archivos: no se sigue recorriendo el tar.
+                break
     return info

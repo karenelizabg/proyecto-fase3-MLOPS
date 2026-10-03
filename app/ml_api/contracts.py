@@ -154,6 +154,10 @@ class ModelS3Status(ContractModel):
     version_id: str | None = None
     size_bytes: int | None = None
     last_modified: datetime | None = None
+    # P3-15: la verificación en vivo falló (red, SSO expirado, permisos), que
+    # no es lo mismo que "el objeto no existe". GET /models sigue respondiendo
+    # 200 con esta versión marcada, en vez de tumbar toda la lista.
+    error: str | None = None
 
 
 class ModelSummary(ContractModel):
