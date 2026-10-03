@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     # basta confiar en que `manifest_meta.json` ya lo garantizó al construirse).
     derived_dir: Path
 
+    # P3-16: ml-api lee `models/registry.json` (lo publica `publish.py`, P3-14)
+    # para saber qué versión está activa y de dónde bajarla de S3. Montado
+    # aparte, no horneado en la imagen (docker-compose.yml): una publicación
+    # nueva no debe esperar a reconstruir ml-api.
+    models_dir: Path = APP_ROOT.parent / "models"
+
     # Copilot (P2-52). Opcional: el gate y el resto del pipeline no la necesitan,
     # así que su ausencia solo deshabilita el chat, no impide arrancar.
     anthropic_api_key: SecretStr | None = None

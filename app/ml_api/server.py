@@ -1,10 +1,10 @@
 """`ml-api` (P3-03): endpoints HTTP para las 5 pantallas de "Modelo".
 
-Solo `/training/jobs` tiene datos reales hoy (lee `training_jobs`, que este
-mismo ticket migra). Los otros cuatro responden `PendingEndpoint`: existen
-como contrato -- para que el frontend los pueda consumir ya -- pero sin
-datos reales todavía, porque eso lo construyen P3-12 (Experiments), P3-13
-(Evaluation), P3-14 (Models) y P3-15/P3-16 (Inference).
+`/training/jobs`, `/experiments/*` y `/predict` tienen datos/inferencia
+reales, el último contra el paquete que publica P3-14 (#21, PR #62) en S3
+(`ml_api.inference.load_active_model`). `/models` y el GET de `/inference`
+siguen respondiendo `PendingEndpoint` hasta que P3-15 construya esa página
+con datos reales -- no porque les falte algo del lado del modelo.
 
 Mismo patrón que `copilot/server.py`: `create_app(settings)` para pruebas,
 `main()` para producción.
@@ -23,6 +23,13 @@ from starlette.routing import Route
 
 from ml_api.contracts import EvaluationLocked, PendingEndpoint, TrainingJob, TrainingJobList
 from ml_api.experiments import get_metric_history, list_runs, update_run_tag
+from ml_api.inference import (
+    FetchCrop,
+    LoadModel,
+    fetch_crop_from_annotation,
+    load_active_model,
+    predict_route,
+)
 from ml_api.repository import (
     TrainingJobNotCancellable,
     create_training_job,
@@ -62,6 +69,8 @@ def create_app(
     list_jobs: ListJobs | None = None,
     create_job: CreateJob | None = None,
     cancel_job: CancelJob | None = None,
+    load_model: LoadModel | None = None,
+    fetch_crop: FetchCrop | None = None,
 ) -> Starlette:
     settings = settings if settings is not None else Settings()
     list_jobs = list_jobs or (lambda: list_training_jobs(get_engine()))
@@ -78,6 +87,8 @@ def create_app(
     cancel_job = cancel_job or (
         lambda job_id: request_training_job_cancellation(get_engine(), job_id)
     )
+    load_model = load_model or load_active_model
+    fetch_crop = fetch_crop or fetch_crop_from_annotation
 
     def health(_: Request) -> JSONResponse:
         return JSONResponse({"status": "ok"})
@@ -165,6 +176,7 @@ def create_app(
             Route("/evaluation", evaluation, methods=["GET"]),
             Route("/models", pending("models"), methods=["GET"]),
             Route("/inference", pending("inference"), methods=["GET"]),
+            Route("/predict", predict_route(load_model, fetch_crop), methods=["POST"]),
         ],
         middleware=[
             Middleware(
